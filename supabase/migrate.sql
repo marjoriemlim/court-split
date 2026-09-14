@@ -202,7 +202,12 @@ values (true, 1623.68, '2026-09-03')
 on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------
--- 7. Tell PostgREST to pick up the new columns immediately
+-- 7. Paid tracking: when each payer settled up (null = still owes)
+-- ---------------------------------------------------------------
+alter table payment_groups add column if not exists paid_at timestamptz;
+
+-- ---------------------------------------------------------------
+-- 8. Tell PostgREST to pick up the new columns immediately
 --    (this is what the "schema cache" error is about)
 -- ---------------------------------------------------------------
 notify pgrst, 'reload schema';

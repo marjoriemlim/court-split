@@ -345,6 +345,55 @@ tr.subrow td:first-child { padding-left: 22px; }
 
 .summary-card.gold { background: var(--shuttle-gold); color: #3a2a0e; }
 
+/* Paid tracking */
+.paid-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px 3px 4px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.paid-toggle:hover { border-color: var(--court-green); }
+
+.paid-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.paid-toggle.on {
+  background: var(--court-green);
+  border-color: var(--court-green);
+  color: white;
+}
+
+.paid-toggle.on .paid-check { border-color: transparent; background: rgba(255, 255, 255, 0.25); }
+.paid-toggle.partial { border-color: var(--court-green); color: var(--court-green); }
+.paid-toggle.partial .paid-check { border-color: var(--court-green); }
+
+tr.row-paid td { color: var(--ink-soft); }
+
+.paid-progress {
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.paid-progress strong { color: var(--ink); }
+
 button, select, input {
   font-family: var(--font-body);
   font-size: 14px;

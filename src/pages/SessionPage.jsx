@@ -117,6 +117,23 @@ function HeadcountCell({ row, setGroups, commit }) {
   )
 }
 
+// `partial` is for a couple where only one of them has paid so far; tapping it
+// marks the rest as paid too.
+function PaidToggle({ paid, partial, onChange }) {
+  return (
+    <button
+      type="button"
+      className={`paid-toggle ${paid ? 'on' : partial ? 'partial' : ''}`}
+      aria-pressed={paid}
+      title={paid ? 'Mark as not paid' : 'Mark as paid'}
+      onClick={() => onChange(!paid)}
+    >
+      <span className="paid-check" aria-hidden="true">{paid ? '✓' : partial ? '–' : ''}</span>
+      {paid ? 'Paid' : partial ? 'Part paid' : 'Unpaid'}
+    </button>
+  )
+}
+
 export default function SessionPage() {
   // "/" means today; "/session/<yyyy-mm-dd>" is any other day.
   const { date: dateParam } = useParams()
@@ -359,6 +376,7 @@ export default function SessionPage() {
               payer_id: t.payer_id,
               payer_status_snapshot: t.payer_status_snapshot,
               headcount: Math.max(1, Math.floor(Number(t.headcount) || 1)),
+              paid_at: t.paid_at ?? null,
             }))
           )
           .select('*, players(name, group_id)')
@@ -425,6 +443,7 @@ export default function SessionPage() {
       payer_status_snapshot: p.status,
       headcount: 1,
       members: null,
+      paid_at: null,
       players: { name: p.name, group_id: p.group_id },
     }
   }
@@ -450,7 +469,9 @@ export default function SessionPage() {
     const existing = groups.find((g) => g.payer_id === p.id)
     if (existing) {
       const hc = Number(existing.headcount) || 1
-      if (hc > 1 || existing.members) {
+      if (existing.paid_at) {
+        if (!window.confirm(`${p.name} is marked as paid. Remove from the session?`)) return
+      } else if (hc > 1 || existing.members) {
         const detail = existing.members ? ` (${existing.members})` : ''
         if (!window.confirm(`${p.name} is covering a headcount of ${hc}${detail}. Remove from the session?`)) return
       }
@@ -492,6 +513,39 @@ export default function SessionPage() {
       .update({ headcount: value })
       .eq('id', row.id)
     if (error) setSaveError(error.message)
+  }
+
+  // Paid is stored as a timestamp (when the money came in); null = still owes.
+  // Rows are matched by payer, since a temp row swaps its id once inserted.
+  async function setPaid(rows, paid) {
+    const paidAt = paid ? new Date().toISOString() : null
+    const before = new Map(rows.map((r) => [r.payer_id, r.paid_at ?? null]))
+    const apply = (valueFor) =>
+      setGroups((prev) =>
+        prev.map((g) => (before.has(g.payer_id) ? { ...g, paid_at: valueFor(g.payer_id) } : g))
+      )
+    apply(() => paidAt)
+
+    // not inserted yet — let the queued insert carry the flag
+    const unqueued = rows.filter((r) => {
+      const queued = isTemp(r.id) && pendingAdds.current.get(r.payer_id)
+      if (queued) queued.paid_at = paidAt
+      return !queued
+    })
+    if (unqueued.length === 0) return
+
+    // an insert already on its way would land unpaid — wait for it, then update
+    if (unqueued.some((r) => isTemp(r.id))) {
+      await flushChain.current
+      apply(() => paidAt)
+    }
+    const ids = unqueued.map((r) => idByPayer.current.get(r.payer_id)).filter(Boolean)
+    if (ids.length === 0) return
+    const { error } = await supabase.from('payment_groups').update({ paid_at: paidAt }).in('id', ids)
+    if (error) {
+      setSaveError(error.message)
+      apply((payerId) => before.get(payerId))
+    }
   }
 
   async function addCoveringGroup(e) {
@@ -653,6 +707,21 @@ export default function SessionPage() {
   const totals = calcSessionTotals(session, groups, extras)
   const notYetIn = players.filter((p) => !groupByPayer.has(p.id))
 
+  // Who has settled up so far, and what is still owed.
+  const payStatus = groups.reduce(
+    (acc, g) => {
+      const amount = calcGroup(session, g, headTotal, extras).amountToPay
+      if (g.paid_at) {
+        acc.paidCount += 1
+        acc.collected += amount
+      } else {
+        acc.outstanding += amount
+      }
+      return acc
+    },
+    { paidCount: 0, collected: 0, outstanding: 0 }
+  )
+
   // Every guest surplus ever banked: the carried-in balance, every other
   // session, and this one live as it's edited.
   const accumulatedFunds =
@@ -711,6 +780,8 @@ export default function SessionPage() {
         names: parts.map((p) => p.row.players?.name).filter(Boolean),
         parts,
         headcount: sum((p) => Number(p.row.headcount) || 0),
+        paidCount: parts.filter((p) => p.row.paid_at).length,
+        allPaid: parts.every((p) => p.row.paid_at),
         allGuest: parts.every((p) => p.row.payer_status_snapshot === 'guest'),
         anyGuest: parts.some((p) => p.row.payer_status_snapshot === 'guest'),
         extrasTotal: sum((p) => p.calc.extrasTotal),
@@ -762,6 +833,7 @@ export default function SessionPage() {
                 sub: lr.row.members ? `+ ${lr.row.members}` : '',
                 note: lr.calc.extrasTotal !== 0 ? `${peso(lr.calc.extrasTotal)} adj.` : '',
                 status: lr.row.payer_status_snapshot,
+                paid: !!lr.row.paid_at,
                 headcount: lr.row.headcount,
                 amount: lr.calc.amountToPay,
               }
@@ -770,6 +842,8 @@ export default function SessionPage() {
                 sub: lr.names.join(' + '),
                 note: lr.extrasTotal !== 0 ? `${peso(lr.extrasTotal)} adj.` : '',
                 status: lr.allGuest ? 'guest' : lr.anyGuest ? 'mixed' : 'regular',
+                paid: lr.allPaid,
+                partPaid: lr.paidCount > 0 && !lr.allPaid,
                 headcount: lr.headcount,
                 amount: lr.amountToPay,
               }
@@ -780,6 +854,8 @@ export default function SessionPage() {
           amount: Number(x.amount) || 0,
         })),
         totalCollected: totals.totalCollected,
+        // only once someone has paid — before that it would just repeat the total
+        outstanding: payStatus.paidCount > 0 ? payStatus.outstanding : null,
         totalFunds: totals.totalFunds,
         totalAccumulated: accumulatedFunds,
         fmt: peso,
@@ -1111,6 +1187,7 @@ export default function SessionPage() {
                   <th className="num">Extras</th>
                   <th className="num">Actual cost</th>
                   <th className="num">Amount to pay</th>
+                  <th>Paid</th>
                   <th className="num">Funds</th>
                   <th></th>
                 </tr>
@@ -1120,7 +1197,12 @@ export default function SessionPage() {
                   if (lr.type === 'solo') {
                     const { row: g, calc: r } = lr
                     return (
-                      <tr key={g.id} className={g.payer_status_snapshot === 'guest' ? 'row-guest' : ''}>
+                      <tr
+                        key={g.id}
+                        className={[g.payer_status_snapshot === 'guest' && 'row-guest', g.paid_at && 'row-paid']
+                          .filter(Boolean)
+                          .join(' ')}
+                      >
                         <td>
                           {g.players?.name}
                           {g.members && <div className="sub-note">+ {g.members}</div>}
@@ -1132,6 +1214,7 @@ export default function SessionPage() {
                         <td className="num">{r.extrasTotal !== 0 ? peso(r.extrasTotal) : '—'}</td>
                         <td className="num">{peso(r.actualCost)}</td>
                         <td className="num"><strong>{peso(r.amountToPay)}</strong></td>
+                        <td><PaidToggle paid={!!g.paid_at} onChange={(v) => setPaid([g], v)} /></td>
                         <td className="num">{r.fundsGenerated > 0 ? `₱${money(r.fundsGenerated)}` : '—'}</td>
                         <td>
                           <button className="danger-link" onClick={() => removeRows([g])}>Remove</button>
@@ -1143,7 +1226,7 @@ export default function SessionPage() {
                   const isOpen = expanded.has(lr.key)
                   return (
                     <Fragment key={lr.key}>
-                      <tr className={lr.allGuest ? 'row-guest' : ''}>
+                      <tr className={[lr.allGuest && 'row-guest', lr.allPaid && 'row-paid'].filter(Boolean).join(' ')}>
                         <td>
                           <button
                             type="button"
@@ -1169,6 +1252,13 @@ export default function SessionPage() {
                         <td className="num">{lr.extrasTotal !== 0 ? peso(lr.extrasTotal) : '—'}</td>
                         <td className="num">{peso(lr.actualCost)}</td>
                         <td className="num"><strong>{peso(lr.amountToPay)}</strong></td>
+                        <td>
+                          <PaidToggle
+                            paid={lr.allPaid}
+                            partial={lr.paidCount > 0}
+                            onChange={(v) => setPaid(lr.parts.map((p) => p.row), v)}
+                          />
+                        </td>
                         <td className="num">{lr.fundsGenerated > 0 ? `₱${money(lr.fundsGenerated)}` : '—'}</td>
                         <td>
                           <button
@@ -1181,7 +1271,7 @@ export default function SessionPage() {
                       </tr>
                       {isOpen &&
                         lr.parts.map(({ row: g, calc: r }) => (
-                          <tr key={g.id} className="subrow">
+                          <tr key={g.id} className={`subrow ${g.paid_at ? 'row-paid' : ''}`}>
                             <td>
                               ↳ {g.players?.name}
                               {g.members && <span className="muted"> · + {g.members}</span>}
@@ -1193,6 +1283,7 @@ export default function SessionPage() {
                             <td className="num">{r.extrasTotal !== 0 ? peso(r.extrasTotal) : '—'}</td>
                             <td className="num">{peso(r.actualCost)}</td>
                             <td className="num">{peso(r.amountToPay)}</td>
+                            <td><PaidToggle paid={!!g.paid_at} onChange={(v) => setPaid([g], v)} /></td>
                             <td className="num">{r.fundsGenerated > 0 ? `₱${money(r.fundsGenerated)}` : '—'}</td>
                             <td>
                               <button className="danger-link" onClick={() => removeRows([g])}>Remove</button>
@@ -1205,6 +1296,19 @@ export default function SessionPage() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {groups.length > 0 && (
+          <p className="paid-progress">
+            <strong>{payStatus.paidCount} of {groups.length}</strong> paid
+            {' · '}{peso(payStatus.collected)} in
+            {' · '}
+            {payStatus.outstanding > 0.005 ? (
+              <><strong>{peso(payStatus.outstanding)}</strong> still to collect</>
+            ) : (
+              <strong>all settled</strong>
+            )}
+          </p>
         )}
 
         <div className="summary-row">

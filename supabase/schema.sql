@@ -59,6 +59,7 @@ create table payment_groups (
   payer_status_snapshot text not null check (payer_status_snapshot in ('regular', 'guest')),
   headcount int not null default 1 check (headcount > 0),
   members text, -- free-text note of who's covered, e.g. "Carl, wife, 3 friends"
+  paid_at timestamptz, -- when they settled up; null = still owes
   created_at timestamptz not null default now()
 );
 

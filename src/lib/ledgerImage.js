@@ -38,9 +38,10 @@ function rowHeight(r) {
  * @param {Object} d
  * @param {string} d.dateLine     - "Mon, Sep 8, 2026 · Evening"
  * @param {string} d.rateLine     - per-person rate summary
- * @param {Array}  d.rows         - { name, sub, note, status, headcount, amount }
+ * @param {Array}  d.rows         - { name, sub, note, status, paid, partPaid, headcount, amount }
  * @param {Array}  d.adjustments  - { label, scope, amount } itemised costs/credits
  * @param {number} d.totalCollected
+ * @param {number|null} [d.outstanding] - still owed by unpaid rows; null hides the line
  * @param {number} d.totalFunds
  * @param {number} [d.totalAccumulated] - all-time guest surplus, this session included
  * @param {(n:number)=>string} d.fmt - peso formatter
@@ -53,7 +54,8 @@ export function drawLedgerCanvas(d) {
   const adjH = adj.length ? 26 + adj.length * 20 + 10 : 0
   const showFunds = d.totalFunds > 0
   const showAccum = Number(d.totalAccumulated) > 0
-  const extraRows = (showFunds ? 1 : 0) + (showAccum ? 1 : 0)
+  const showOutstanding = d.outstanding != null
+  const extraRows = (showFunds ? 1 : 0) + (showAccum ? 1 : 0) + (showOutstanding ? 1 : 0)
   const H = PAD + 34 + 20 + 22 + 18 + 26 + rowsH + adjH + 18 + 58 + extraRows * 26 + 22 + PAD
 
   const canvas = document.createElement('canvas')
@@ -126,16 +128,23 @@ export function drawLedgerCanvas(d) {
     ctx.fillStyle = C.ink
     ctx.font = `600 14px ${BODY}`
     const nameMax = R - L - 190
-    const name = ellipsize(ctx, r.name, nameMax)
+    // leave room for the tags so they never run into the PAX column
+    const tagRoom = (r.status !== 'regular' ? 45 : 0) + (r.paid || r.partPaid ? 65 : 0)
+    const name = ellipsize(ctx, r.name, nameMax - tagRoom)
     ctx.fillText(name, L, baseline)
 
-    // status tag after the name
-    const tagX = L + ctx.measureText(name).width + 8
+    // status + paid tags after the name
+    let tagX = L + ctx.measureText(name).width + 8
+    ctx.font = `700 9px ${BODY}`
     if (r.status !== 'regular') {
       const tag = r.status === 'guest' ? 'GUEST' : 'MIXED'
-      ctx.font = `700 9px ${BODY}`
       ctx.fillStyle = r.status === 'guest' ? '#7a5a12' : C.inkSoft
       ctx.fillText(tag, tagX, baseline - 1)
+      tagX += ctx.measureText(tag).width + 8
+    }
+    if (r.paid || r.partPaid) {
+      ctx.fillStyle = C.green
+      ctx.fillText(r.paid ? '✓ PAID' : 'PART PAID', tagX, baseline - 1)
     }
 
     if (r.sub) {
@@ -207,6 +216,7 @@ export function drawLedgerCanvas(d) {
 
   // One line per figure, stacked inside the green box.
   const lines = [{ label: 'TOTAL COLLECTED', amount: d.totalCollected, lead: true }]
+  if (showOutstanding) lines.push({ label: 'STILL TO COLLECT', amount: d.outstanding })
   if (showFunds) lines.push({ label: 'FUNDS GENERATED', amount: d.totalFunds })
   if (showAccum) {
     lines.push({ label: 'TOTAL ACCUMULATED FUNDS', amount: d.totalAccumulated })
