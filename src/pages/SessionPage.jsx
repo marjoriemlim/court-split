@@ -821,11 +821,17 @@ export default function SessionPage() {
       const idx = daySessions.findIndex((s) => s.id === session.id)
       const sessionName = label || (daySessions.length > 1 ? `Session ${idx + 1}` : '')
 
+      const shuttleCount = Number(session.shuttle_count) || 0
+
       const canvas = drawLedgerCanvas({
         dateLine: prettyDate(date) + (sessionName ? ` · ${sessionName}` : ''),
         rateLine:
           `${peso(rates.courtUnitCost)} court + ${peso(rates.shuttleUnitCost)} shuttle per person` +
-          ` · ${headTotal} player${headTotal === 1 ? '' : 's'}`,
+          ` · ${headTotal} player${headTotal === 1 ? '' : 's'}` +
+          // only when shuttles were actually logged — "0 shuttles used" is noise
+          (shuttleCount
+            ? ` · ${shuttleCount} shuttle${shuttleCount === 1 ? '' : 's'} used`
+            : ''),
         rows: ledgerRows.map((lr) =>
           lr.type === 'solo'
             ? {
