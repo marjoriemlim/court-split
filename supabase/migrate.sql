@@ -30,6 +30,7 @@ alter table sessions
   add column if not exists court_fee_total     numeric(10,2) not null default 0,
   add column if not exists shuttle_count       numeric(10,2) not null default 0,
   add column if not exists shuttle_price_each  numeric(10,2) not null default 0,
+  add column if not exists shuttles            jsonb not null default '[]'::jsonb,
   add column if not exists label               text;
 
 do $$
@@ -122,7 +123,13 @@ rates as (
         then s.court_fee_total / nullif(ht.total_headcount, 0)
       else s.court_fee_per_slot
     end as court_unit_cost,
-    (s.shuttle_count * s.shuttle_price_each) / nullif(ht.total_headcount, 0) as shuttle_unit_cost
+    -- sum of every shuttle line; sessions without lines fall back to the
+    -- single-shuttle columns
+    coalesce(
+      (select sum(coalesce((l->>'count')::numeric, 0) * coalesce((l->>'price_each')::numeric, 0))
+         from jsonb_array_elements(s.shuttles) l),
+      s.shuttle_count * s.shuttle_price_each
+    ) / nullif(ht.total_headcount, 0) as shuttle_unit_cost
   from sessions s
   left join head_totals ht on ht.session_id = s.id
 ),
@@ -231,7 +238,22 @@ create policy "authenticated read shuttle_types" on shuttle_types for select usi
 create policy "authenticated write shuttle_types" on shuttle_types for all using (auth.role() = 'authenticated');
 
 -- ---------------------------------------------------------------
--- 9. Tell PostgREST to pick up the new columns immediately
+-- 9. Several shuttle types per session: move each session's single
+--    shuttle into a one-line `shuttles` list. Only touches sessions with
+--    no lines yet, so re-running it is harmless.
+-- ---------------------------------------------------------------
+update sessions s
+   set shuttles = jsonb_build_array(jsonb_build_object(
+         'id', 'legacy',
+         'type_id', s.shuttle_type_id,
+         'name', (select st.name from shuttle_types st where st.id = s.shuttle_type_id),
+         'count', s.shuttle_count,
+         'price_each', s.shuttle_price_each))
+ where s.shuttles = '[]'::jsonb
+   and (s.shuttle_count <> 0 or s.shuttle_price_each <> 0);
+
+-- ---------------------------------------------------------------
+-- 10. Tell PostgREST to pick up the new columns immediately
 --    (this is what the "schema cache" error is about)
 -- ---------------------------------------------------------------
 notify pgrst, 'reload schema';

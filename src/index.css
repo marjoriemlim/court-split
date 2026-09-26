@@ -460,6 +460,40 @@ button.danger-link {
 
 .field-row .field { flex: 1; }
 
+/* Shuttle lines — one row per type used in the session */
+.shuttle-lines {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-bottom: 12px;
+}
+
+.shuttle-lines-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.shuttle-lines-head h3 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.shuttle-lines-head button.ghost { padding: 6px 12px; }
+
+.shuttle-lines > .hint { margin: 0 0 12px; }
+.shuttle-lines > .shuttle-lines-sum { margin: 0; text-align: right; }
+
+.shuttle-line-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 36px;
+  font-variant-numeric: tabular-nums;
+}
+
 .empty-state {
   text-align: center;
   padding: 40px 20px;
@@ -600,6 +634,15 @@ button.danger-link {
   .field-row .field:empty { display: none; }
 
   .rate-chip { min-width: 0; flex-basis: 100%; }
+
+  /* each stacked shuttle line reads as its own card */
+  .shuttle-line {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px 0;
+    margin-bottom: 10px;
+  }
+  .shuttle-lines-head button.ghost { width: auto; }
 
   .extra-list li {
     flex-wrap: wrap;

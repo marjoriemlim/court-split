@@ -42,11 +42,17 @@ create table shuttle_types (
 -- SESSIONS: one row per playing block. A date can have several (e.g. a
 -- morning and an evening game) — distinguish them with `label`.
 --
+-- Shuttles are a list of lines in `shuttles`, one per type used, e.g.
+--   [{"id":"…","type_id":"<uuid>","name":"Mavis 350","count":9,"price_each":95},
+--    {"id":"…","type_id":"<uuid>","name":"RSL","count":5,"price_each":110}]
+-- Each line's price_each is the actual price paid this session, seeded from
+-- the type's base_price but independent of it. `name` is a snapshot so the
+-- line still reads right if the type is deleted.
 -- Shuttle cost per person is DERIVED, not stored: it's
---   (shuttle_count * shuttle_price_each) / (sum of headcounts this session)
--- `shuttle_type_id` just records which shuttle it was; `shuttle_price_each`
--- is the actual price used for this session and is independent of the
--- type's `base_price`.
+--   sum(count * price_each over the lines) / (sum of headcounts this session)
+-- shuttle_type_id / shuttle_count / shuttle_price_each are the older
+-- single-shuttle columns, kept mirrored (total count, average price) and used
+-- only when `shuttles` is empty.
 --
 -- Court fee is one of two modes:
 --   'per_person' → everyone pays court_fee_per_slot
@@ -62,6 +68,7 @@ create table sessions (
   shuttle_type_id uuid references shuttle_types(id) on delete set null,
   shuttle_count numeric(10,2) not null default 0,           -- shuttles used this session
   shuttle_price_each numeric(10,2) not null default 0,      -- price per shuttle, this session
+  shuttles jsonb not null default '[]'::jsonb,              -- shuttle lines, see above
   guest_fixed_rate numeric(10,2) not null default 300,
   notes text,
   created_at timestamptz not null default now()
@@ -127,7 +134,13 @@ rates as (
         then s.court_fee_total / nullif(ht.total_headcount, 0)
       else s.court_fee_per_slot
     end as court_unit_cost,
-    (s.shuttle_count * s.shuttle_price_each) / nullif(ht.total_headcount, 0) as shuttle_unit_cost
+    -- sum of every shuttle line; sessions without lines fall back to the
+    -- single-shuttle columns
+    coalesce(
+      (select sum(coalesce((l->>'count')::numeric, 0) * coalesce((l->>'price_each')::numeric, 0))
+         from jsonb_array_elements(s.shuttles) l),
+      s.shuttle_count * s.shuttle_price_each
+    ) / nullif(ht.total_headcount, 0) as shuttle_unit_cost
   from sessions s
   left join head_totals ht on ht.session_id = s.id
 ),
@@ -147,6 +160,7 @@ select
   pg.id as group_id,
   s.id as session_id,
   s.session_date,
+  s.label as session_label,
   p.name as payer_name,
   pg.payer_status_snapshot as status,
   pg.headcount,
