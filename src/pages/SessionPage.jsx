@@ -979,9 +979,6 @@ export default function SessionPage() {
           scope: x.payment_group_id ? targetName(x.payment_group_id) : 'split among everyone',
           amount: Number(x.amount) || 0,
         })),
-        totalCollected: totals.totalCollected,
-        // only once someone has paid — before that it would just repeat the total
-        outstanding: payStatus.paidCount > 0 ? payStatus.outstanding : null,
         totalFunds: totals.totalFunds,
         totalAccumulated: accumulatedFunds,
         fmt: peso,
