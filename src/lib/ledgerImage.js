@@ -38,7 +38,9 @@ function rowHeight(r) {
  * @param {Object} d
  * @param {string} d.dateLine     - "Mon, Sep 8, 2026 · Evening"
  * @param {string} d.rateLine     - per-person rate summary
- * @param {Array}  d.rows         - { name, sub, note, status, paid, partPaid, headcount, amount }
+ * @param {Array}  [d.shuttles]  - { name, count, cost } one per shuttle type used
+ * @param {number} [d.shuttleTotal] - combined cost of every shuttle type
+ * @param {Array}  d.rows        - { name, sub, note, status, paid, partPaid, headcount, amount }
  * @param {Array}  d.adjustments  - { label, scope, amount } itemised costs/credits
  * @param {number} d.totalCollected
  * @param {number|null} [d.outstanding] - still owed by unpaid rows; null hides the line
@@ -50,13 +52,15 @@ function rowHeight(r) {
 export function drawLedgerCanvas(d) {
   const fmt = d.fmt
   const adj = d.adjustments || []
+  const sh = d.shuttles || []
+  const shuttleH = sh.length ? 6 + sh.length * 20 + (sh.length > 1 ? 28 : 0) + 36 : 0
   const rowsH = d.rows.reduce((h, r) => h + rowHeight(r), 0)
   const adjH = adj.length ? 26 + adj.length * 20 + 10 : 0
   const showFunds = d.totalFunds > 0
   const showAccum = Number(d.totalAccumulated) > 0
   const showOutstanding = d.outstanding != null
   const extraRows = (showFunds ? 1 : 0) + (showAccum ? 1 : 0) + (showOutstanding ? 1 : 0)
-  const H = PAD + 34 + 20 + 22 + 18 + 26 + rowsH + adjH + 18 + 58 + extraRows * 26 + 22 + PAD
+  const H = PAD + 34 + 20 + 22 + 18 + shuttleH + 26 + rowsH + adjH + 18 + 58 + extraRows * 26 + 22 + PAD
 
   const canvas = document.createElement('canvas')
   canvas.width = W * SCALE
@@ -104,6 +108,46 @@ export function drawLedgerCanvas(d) {
   ctx.lineTo(R, y)
   ctx.stroke()
   y += 18
+
+  // shuttle cost per type, so payers can see what the shuttle share was made of
+  if (sh.length) {
+    ctx.fillStyle = C.inkSoft
+    ctx.font = `600 10px ${BODY}`
+    ctx.textAlign = 'left'
+    ctx.fillText('SHUTTLES', L, y)
+    y += 6
+
+    const shuttleRow = (name, count, cost, bold) => {
+      y += 20
+      ctx.textAlign = 'left'
+      ctx.font = `${bold ? 600 : 500} 12px ${BODY}`
+      ctx.fillStyle = C.ink
+      ctx.fillText(ellipsize(ctx, name, R - L - 220), L, y)
+
+      ctx.textAlign = 'right'
+      ctx.font = `400 12px ${BODY}`
+      ctx.fillStyle = C.inkSoft
+      ctx.fillText(`${count} pc${count === 1 ? '' : 's'}`, R - 130, y)
+
+      ctx.font = `600 12px ${BODY}`
+      ctx.fillStyle = C.ink
+      ctx.fillText(fmt(cost), R, y)
+    }
+
+    for (const t of sh) shuttleRow(t.name, t.count, t.cost, false)
+
+    if (sh.length > 1) {
+      y += 8
+      ctx.strokeStyle = C.border
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(L, y - 0.5)
+      ctx.lineTo(R, y - 0.5)
+      ctx.stroke()
+      shuttleRow('All shuttles', sh.reduce((n, t) => n + t.count, 0), d.shuttleTotal, true)
+    }
+    y += 36
+  }
 
   // column headers
   ctx.fillStyle = C.inkSoft
