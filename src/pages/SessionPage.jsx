@@ -858,6 +858,18 @@ export default function SessionPage() {
 
   const typeName = (l) => shuttleTypes.find((t) => t.id === l.type_id)?.name || l.name || 'Shuttle'
 
+  // Cost per shuttle type — two lines of the same type (bought at different
+  // prices) roll up into one figure.
+  const shuttleByType = []
+  for (const l of lines) {
+    const key = l.type_id || `untyped:${l.name || ''}`
+    let t = shuttleByType.find((x) => x.key === key)
+    if (!t) shuttleByType.push((t = { key, name: typeName(l), count: 0, cost: 0 }))
+    const count = Number(l.count) || 0
+    t.count += count
+    t.cost += count * (Number(l.price_each) || 0)
+  }
+
   const targetName = (gid) => groups.find((g) => g.id === gid)?.players?.name || 'Unknown'
 
   // Ledger rows: bucket payment groups by the payer's player-group so couples bill as one line.
@@ -1040,6 +1052,24 @@ export default function SessionPage() {
             <h3>Shuttles used</h3>
             <button type="button" className="ghost" onClick={addShuttleLine}>+ Add shuttle</button>
           </div>
+          {shuttleByType.length > 0 && (
+            <div className="shuttle-summary">
+              {shuttleByType.map((t) => (
+                <div className="shuttle-summary-item" key={t.key}>
+                  <span className="shuttle-summary-name">{t.name}</span>
+                  <span className="shuttle-summary-cost">₱{money(t.cost)}</span>
+                  <span className="shuttle-summary-count">{t.count} pc{t.count === 1 ? '' : 's'}</span>
+                </div>
+              ))}
+              {shuttleByType.length > 1 && (
+                <div className="shuttle-summary-item total">
+                  <span className="shuttle-summary-name">All shuttles</span>
+                  <span className="shuttle-summary-cost">₱{money(rates.shuttleTotalCost)}</span>
+                  <span className="shuttle-summary-count">{rates.shuttleCount} pcs</span>
+                </div>
+              )}
+            </div>
+          )}
           {lines.length === 0 && <p className="hint">No shuttles logged for this session yet.</p>}
           {lines.map((l) => {
             const known = !l.type_id || shuttleTypes.some((t) => t.id === l.type_id)
@@ -1089,11 +1119,6 @@ export default function SessionPage() {
               </div>
             )
           })}
-          {lines.length > 1 && (
-            <p className="hint shuttle-lines-sum">
-              {rates.shuttleCount} shuttles · ₱{money(rates.shuttleTotalCost)} total
-            </p>
-          )}
         </div>
 
         {shuttleTypes.length > 0 && (
