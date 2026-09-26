@@ -927,10 +927,19 @@ export default function SessionPage() {
       const sessionName = label || (daySessions.length > 1 ? `Session ${idx + 1}` : '')
 
       const shuttleCount = rates.shuttleCount
-      // name the mix only when there is one, e.g. "(9 Mavis 350, 5 RSL)"
-      const named = lines.filter((l) => Number(l.count) > 0)
-      const shuttleMix =
-        named.length > 1 ? ` (${named.map((l) => `${Number(l.count)} ${typeName(l)}`).join(', ')})` : ''
+
+      // Cost per shuttle type for the image — two lines of the same type
+      // (bought at different prices) roll up into one figure.
+      const shuttleByType = []
+      for (const l of lines) {
+        const count = Number(l.count) || 0
+        if (!count) continue
+        const key = l.type_id || `untyped:${l.name || ''}`
+        let t = shuttleByType.find((x) => x.key === key)
+        if (!t) shuttleByType.push((t = { key, name: typeName(l), count: 0, cost: 0 }))
+        t.count += count
+        t.cost += count * (Number(l.price_each) || 0)
+      }
 
       const canvas = drawLedgerCanvas({
         dateLine: prettyDate(date) + (sessionName ? ` · ${sessionName}` : ''),
@@ -939,8 +948,10 @@ export default function SessionPage() {
           ` · ${headTotal} player${headTotal === 1 ? '' : 's'}` +
           // only when shuttles were actually logged — "0 shuttles used" is noise
           (shuttleCount
-            ? ` · ${shuttleCount} shuttle${shuttleCount === 1 ? '' : 's'} used${shuttleMix}`
+            ? ` · ${shuttleCount} shuttle${shuttleCount === 1 ? '' : 's'} used`
             : ''),
+        shuttles: shuttleByType,
+        shuttleTotal: rates.shuttleTotalCost,
         rows: ledgerRows.map((lr) =>
           lr.type === 'solo'
             ? {
@@ -968,9 +979,6 @@ export default function SessionPage() {
           scope: x.payment_group_id ? targetName(x.payment_group_id) : 'split among everyone',
           amount: Number(x.amount) || 0,
         })),
-        totalCollected: totals.totalCollected,
-        // only once someone has paid — before that it would just repeat the total
-        outstanding: payStatus.paidCount > 0 ? payStatus.outstanding : null,
         totalFunds: totals.totalFunds,
         totalAccumulated: accumulatedFunds,
         fmt: peso,
