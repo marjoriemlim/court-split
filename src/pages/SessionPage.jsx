@@ -5,6 +5,8 @@ import {
   calcGroup,
   calcSessionTotals,
   resolveRates,
+  shuttleLines,
+  shuttleTotals,
   extrasSummary,
   totalHeadcount,
   money,
@@ -333,7 +335,7 @@ export default function SessionPage() {
 
       const { data: all } = await supabase
         .from('sessions')
-        .select('id, court_fee_mode, court_fee_per_slot, court_fee_total, shuttle_count, shuttle_price_each, guest_fixed_rate, payment_groups(*), extra_costs(*)')
+        .select('id, court_fee_mode, court_fee_per_slot, court_fee_total, shuttles, shuttle_count, shuttle_price_each, shuttle_type_id, guest_fixed_rate, payment_groups(*), extra_costs(*)')
 
       if (cancelled) return
       const bySession = {}
@@ -426,34 +428,75 @@ export default function SessionPage() {
   // Local state is the truth while you type; the write is debounced and the
   // response is deliberately NOT fed back into state.
   function updateSessionField(field, value) {
-    setSessionRow((prev) => (prev ? { ...prev, [field]: value } : prev))
+    updateSessionFields({ [field]: value }, field)
+  }
+
+  // Several columns in one debounced write; `key` names the debounce slot and
+  // the thing we couldn't save.
+  function updateSessionFields(patch, key) {
+    setSessionRow((prev) => (prev ? { ...prev, ...patch } : prev))
     // capture the row now — switching dates or sessions before the debounce
     // fires must not redirect this write onto a different session
     const targetId = sessionIdRef.current
     // keep the tab strip in step (it reads the label from this list)
-    setDaySessions((prev) => prev.map((s) => (s.id === targetId ? { ...s, [field]: value } : s)))
-    clearTimeout(sessionTimers.current[field])
-    sessionTimers.current[field] = setTimeout(async () => {
+    setDaySessions((prev) => prev.map((s) => (s.id === targetId ? { ...s, ...patch } : s)))
+    clearTimeout(sessionTimers.current[key])
+    sessionTimers.current[key] = setTimeout(async () => {
       const { error } = await supabase
         .from('sessions')
-        .update({ [field]: value })
+        .update(patch)
         .eq('id', targetId)
-      setSaveError(error ? `Couldn't save ${field.replace(/_/g, ' ')} — ${error.message}` : '')
+      setSaveError(error ? `Couldn't save ${key.replace(/_/g, ' ')} — ${error.message}` : '')
     }, 500)
   }
 
-  // Picking a type sets it on the session and suggests that type's base
-  // price — the price field itself stays independently editable so it can
-  // still vary session to session (bulk deals, price hikes, etc.).
-  function selectShuttleType(typeId) {
-    updateSessionField('shuttle_type_id', typeId || null)
-    if (typeId) {
-      const type = shuttleTypes.find((t) => t.id === typeId)
-      if (type) updateSessionField('shuttle_price_each', Number(type.base_price) || 0)
-    }
+  // ── Shuttles ─────────────────────────────────────────────────────
+  // A session can mix shuttle types, e.g. 9 × Mavis at one price and 5 × RSL
+  // at another. Each line carries its own price, seeded from the type's base
+  // price but editable, so it can still vary session to session.
+  const lines = session ? shuttleLines(session).map((l, i) => ({ ...l, id: l.id ?? `line-${i}` })) : []
+
+  function saveShuttles(next) {
+    const { count, cost } = shuttleTotals(next)
+    updateSessionFields(
+      {
+        shuttles: next,
+        // Mirrored into the single-shuttle columns so an older build of the
+        // app still charges the right total.
+        shuttle_count: count,
+        shuttle_price_each: count ? Math.round((cost / count) * 100) / 100 : 0,
+        shuttle_type_id: next.length === 1 ? next[0].type_id ?? null : null,
+      },
+      'shuttles'
+    )
   }
 
-  async function addShuttleType() {
+  const newLineId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
+
+  function addShuttleLine() {
+    saveShuttles([...lines, { id: newLineId(), type_id: null, name: null, count: 0, price_each: 0 }])
+  }
+
+  function updateShuttleLine(id, patch) {
+    saveShuttles(lines.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  }
+
+  function removeShuttleLine(id) {
+    saveShuttles(lines.filter((l) => l.id !== id))
+  }
+
+  // Picking a type suggests its base price; the name is kept on the line so
+  // it still reads right if the type is later deleted.
+  function setLineType(id, type) {
+    updateShuttleLine(
+      id,
+      type
+        ? { type_id: type.id, name: type.name, price_each: Number(type.base_price) || 0 }
+        : { type_id: null, name: null }
+    )
+  }
+
+  async function addShuttleType(lineId) {
     const name = window.prompt('New shuttle type (e.g. "Yonex Mavis 350"):')
     if (name == null || !name.trim()) return
     const priceText = window.prompt(`Base price for "${name.trim()}":`, '0')
@@ -469,7 +512,7 @@ export default function SessionPage() {
       return
     }
     setShuttleTypes((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
-    selectShuttleType(data.id)
+    if (lineId) setLineType(lineId, data)
   }
 
   async function editShuttleTypePrice(type) {
@@ -485,7 +528,7 @@ export default function SessionPage() {
   }
 
   async function deleteShuttleType(type) {
-    if (!window.confirm(`Delete shuttle type "${type.name}"? Sessions using it keep their price, just lose the label.`)) return
+    if (!window.confirm(`Delete shuttle type "${type.name}"? Sessions that used it keep their shuttles and prices.`)) return
     const { error } = await supabase.from('shuttle_types').delete().eq('id', type.id)
     if (error) {
       alert(error.message)
@@ -813,6 +856,8 @@ export default function SessionPage() {
     }
   }
 
+  const typeName = (l) => shuttleTypes.find((t) => t.id === l.type_id)?.name || l.name || 'Shuttle'
+
   const targetName = (gid) => groups.find((g) => g.id === gid)?.players?.name || 'Unknown'
 
   // Ledger rows: bucket payment groups by the payer's player-group so couples bill as one line.
@@ -881,7 +926,11 @@ export default function SessionPage() {
       const idx = daySessions.findIndex((s) => s.id === session.id)
       const sessionName = label || (daySessions.length > 1 ? `Session ${idx + 1}` : '')
 
-      const shuttleCount = Number(session.shuttle_count) || 0
+      const shuttleCount = rates.shuttleCount
+      // name the mix only when there is one, e.g. "(9 Mavis 350, 5 RSL)"
+      const named = lines.filter((l) => Number(l.count) > 0)
+      const shuttleMix =
+        named.length > 1 ? ` (${named.map((l) => `${Number(l.count)} ${typeName(l)}`).join(', ')})` : ''
 
       const canvas = drawLedgerCanvas({
         dateLine: prettyDate(date) + (sessionName ? ` · ${sessionName}` : ''),
@@ -890,7 +939,7 @@ export default function SessionPage() {
           ` · ${headTotal} player${headTotal === 1 ? '' : 's'}` +
           // only when shuttles were actually logged — "0 shuttles used" is noise
           (shuttleCount
-            ? ` · ${shuttleCount} shuttle${shuttleCount === 1 ? '' : 's'} used`
+            ? ` · ${shuttleCount} shuttle${shuttleCount === 1 ? '' : 's'} used${shuttleMix}`
             : ''),
         rows: ledgerRows.map((lr) =>
           lr.type === 'solo'
@@ -976,39 +1025,6 @@ export default function SessionPage() {
             value={session.guest_fixed_rate}
             onCommit={(v) => updateSessionField('guest_fixed_rate', v)}
           />
-        </div>
-
-        <div className="field-row">
-          <div className="field">
-            <label>Shuttle type</label>
-            <select
-              value={session.shuttle_type_id || ''}
-              onChange={(e) => {
-                if (e.target.value === '__new__') addShuttleType()
-                else selectShuttleType(e.target.value)
-              }}
-            >
-              <option value="">— No type —</option>
-              {shuttleTypes.map((t) => (
-                <option key={t.id} value={t.id}>{t.name} (₱{money(t.base_price)})</option>
-              ))}
-              <option value="__new__">+ Add new type…</option>
-            </select>
-          </div>
-          <NumberField
-            label="Shuttles used this session"
-            step="1"
-            min="0"
-            value={session.shuttle_count ?? 0}
-            onCommit={(v) => updateSessionField('shuttle_count', v)}
-          />
-          <NumberField
-            label="Price per shuttle (this session)"
-            step="0.01"
-            min="0"
-            value={session.shuttle_price_each ?? 0}
-            onCommit={(v) => updateSessionField('shuttle_price_each', v)}
-          />
           <div className="field">
             <label>Label (optional)</label>
             <input
@@ -1017,6 +1033,67 @@ export default function SessionPage() {
               placeholder="e.g. Morning, Evening"
             />
           </div>
+        </div>
+
+        <div className="shuttle-lines">
+          <div className="shuttle-lines-head">
+            <h3>Shuttles used</h3>
+            <button type="button" className="ghost" onClick={addShuttleLine}>+ Add shuttle</button>
+          </div>
+          {lines.length === 0 && <p className="hint">No shuttles logged for this session yet.</p>}
+          {lines.map((l) => {
+            const known = !l.type_id || shuttleTypes.some((t) => t.id === l.type_id)
+            return (
+              <div className="field-row shuttle-line" key={l.id}>
+                <div className="field">
+                  <label>Shuttle type</label>
+                  <select
+                    value={l.type_id || ''}
+                    onChange={(e) => {
+                      if (e.target.value === '__new__') addShuttleType(l.id)
+                      else setLineType(l.id, shuttleTypes.find((t) => t.id === e.target.value) || null)
+                    }}
+                  >
+                    <option value="">— No type —</option>
+                    {/* a type deleted since keeps its name on the line */}
+                    {!known && <option value={l.type_id}>{l.name || 'Deleted type'}</option>}
+                    {shuttleTypes.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name} (₱{money(t.base_price)})</option>
+                    ))}
+                    <option value="__new__">+ Add new type…</option>
+                  </select>
+                </div>
+                <NumberField
+                  label="Pieces"
+                  step="1"
+                  min="0"
+                  value={l.count ?? 0}
+                  onCommit={(v) => updateShuttleLine(l.id, { count: v })}
+                />
+                <NumberField
+                  label="Price per shuttle"
+                  step="0.01"
+                  min="0"
+                  value={l.price_each ?? 0}
+                  onCommit={(v) => updateShuttleLine(l.id, { price_each: v })}
+                />
+                <div className="field shuttle-line-end">
+                  <label>Subtotal</label>
+                  <div className="shuttle-line-total">
+                    <span>₱{money((Number(l.count) || 0) * (Number(l.price_each) || 0))}</span>
+                    <button type="button" className="danger-link" onClick={() => removeShuttleLine(l.id)}>
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+          {lines.length > 1 && (
+            <p className="hint shuttle-lines-sum">
+              {rates.shuttleCount} shuttles · ₱{money(rates.shuttleTotalCost)} total
+            </p>
+          )}
         </div>
 
         {shuttleTypes.length > 0 && (

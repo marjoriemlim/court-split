@@ -6,6 +6,35 @@ export function totalHeadcount(groups) {
 }
 
 /**
+ * The shuttle lines used in a session — one per type, e.g. 9 × Mavis at ₱95
+ * plus 5 × RSL at ₱110. Sessions saved before multi-shuttle support (or by an
+ * older build of the app) only have the single shuttle_count / price pair, so
+ * that is read as a one-line list.
+ *
+ * @returns {Array<{ type_id, name, count, price_each }>}
+ */
+export function shuttleLines(session) {
+  if (Array.isArray(session?.shuttles) && session.shuttles.length) return session.shuttles
+  const count = Number(session?.shuttle_count) || 0
+  const price = Number(session?.shuttle_price_each) || 0
+  if (!count && !price) return []
+  return [{ type_id: session.shuttle_type_id ?? null, name: null, count, price_each: price }]
+}
+
+/** Total shuttles used and their combined cost across every line. */
+export function shuttleTotals(lines) {
+  return (lines || []).reduce(
+    (acc, l) => {
+      const count = Number(l.count) || 0
+      acc.count += count
+      acc.cost += count * (Number(l.price_each) || 0)
+      return acc
+    },
+    { count: 0, cost: 0 }
+  )
+}
+
+/**
  * Resolve the per-person court + shuttle rates for a session.
  * Both can be derived from session-level totals divided by the number of players.
  *
@@ -13,8 +42,7 @@ export function totalHeadcount(groups) {
  *   court_fee_mode: 'per_person' | 'split',
  *   court_fee_per_slot,   // used when mode === 'per_person'
  *   court_fee_total,      // used when mode === 'split'
- *   shuttle_count,        // shuttles used this session
- *   shuttle_price_each,   // price per shuttle
+ *   shuttles,             // [{ type_id, name, count, price_each }] — see shuttleLines
  * }
  * @param {number} headTotal - sum of all headcounts in the session
  */
@@ -22,8 +50,7 @@ export function resolveRates(session, headTotal) {
   const players = Number(headTotal) > 0 ? Number(headTotal) : 0
   const divisor = players || 1 // avoid divide-by-zero; rates read as 0 anyway when there's no total
 
-  const shuttleTotalCost =
-    (Number(session.shuttle_count) || 0) * (Number(session.shuttle_price_each) || 0)
+  const { count: shuttleCount, cost: shuttleTotalCost } = shuttleTotals(shuttleLines(session))
   const shuttleUnitCost = players ? shuttleTotalCost / divisor : 0
 
   const courtFeeTotal = Number(session.court_fee_total) || 0
@@ -34,7 +61,7 @@ export function resolveRates(session, headTotal) {
         : 0
       : Number(session.court_fee_per_slot) || 0
 
-  return { players, shuttleTotalCost, shuttleUnitCost, courtFeeTotal, courtUnitCost }
+  return { players, shuttleCount, shuttleTotalCost, shuttleUnitCost, courtFeeTotal, courtUnitCost }
 }
 
 /**
