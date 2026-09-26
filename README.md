@@ -8,7 +8,7 @@ Auto-calculates court fees, shuttle costs, and guest markup ("funds") for weekly
 - **A date can hold several sessions** — a morning game and an evening one. The tab strip under the date bar switches between them, **+ Add session** starts another, and each carries its own rates, roster, extras and totals. Name them with the optional **Label** field ("Morning", "Evening"); unlabelled ones show as "Session 1", "Session 2" in creation order.
 - A **payment group** = one payer covering a headcount of people (themselves + anyone they bring).
 - `players` = the sum of every payment group's headcount in that session.
-- **Shuttle cost per person** is auto-calculated: enter the number of **shuttles used** and the **price per shuttle**; the app computes `shuttle_count × shuttle_price_each ÷ players`.
+- **Shuttle cost per person** is auto-calculated: enter the number of **shuttles used** and the **price per shuttle**; the app computes `shuttle_count × shuttle_price_each ÷ players`. Optionally pick a **shuttle type** (e.g. "Yonex Mavis 350") — each type has a suggested **base price** that fills in the price field, but the session's own price stays editable so the actual cost can still vary session to session.
 - **Court fee** has two modes, picked per session:
   - *Fixed amount per person* → `court_fee_per_slot`
   - *Total court fee ÷ all players* → `court_fee_total ÷ players`

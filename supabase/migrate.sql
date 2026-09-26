@@ -207,7 +207,31 @@ on conflict (id) do nothing;
 alter table payment_groups add column if not exists paid_at timestamptz;
 
 -- ---------------------------------------------------------------
--- 8. Tell PostgREST to pick up the new columns immediately
+-- 8. Shuttle types: the brands/grades you buy, each with a suggested
+--    base price. A session still stores its own shuttle_price_each, so
+--    the actual price paid can vary session to session even for the same
+--    type (bulk deals, price hikes, etc.).
+-- ---------------------------------------------------------------
+create table if not exists shuttle_types (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  base_price numeric(10,2) not null default 0,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+alter table sessions
+  add column if not exists shuttle_type_id uuid references shuttle_types(id) on delete set null;
+
+alter table shuttle_types enable row level security;
+
+drop policy if exists "authenticated read shuttle_types" on shuttle_types;
+drop policy if exists "authenticated write shuttle_types" on shuttle_types;
+create policy "authenticated read shuttle_types" on shuttle_types for select using (auth.role() = 'authenticated');
+create policy "authenticated write shuttle_types" on shuttle_types for all using (auth.role() = 'authenticated');
+
+-- ---------------------------------------------------------------
+-- 9. Tell PostgREST to pick up the new columns immediately
 --    (this is what the "schema cache" error is about)
 -- ---------------------------------------------------------------
 notify pgrst, 'reload schema';

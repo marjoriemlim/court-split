@@ -24,11 +24,29 @@ create table players (
 );
 
 -- ─────────────────────────────────────────────
+-- SHUTTLE TYPES: the brands/grades you buy (e.g. "Yonex Mavis 350",
+-- "RSL Tourney"). `base_price` is just the default suggested when a session
+-- picks this type — each session stores its own `shuttle_price_each`, so the
+-- actual price paid can still vary session to session (bulk deals, price
+-- hikes, etc.) without changing this default.
+-- ─────────────────────────────────────────────
+create table shuttle_types (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  base_price numeric(10,2) not null default 0,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+-- ─────────────────────────────────────────────
 -- SESSIONS: one row per playing block. A date can have several (e.g. a
 -- morning and an evening game) — distinguish them with `label`.
 --
 -- Shuttle cost per person is DERIVED, not stored: it's
 --   (shuttle_count * shuttle_price_each) / (sum of headcounts this session)
+-- `shuttle_type_id` just records which shuttle it was; `shuttle_price_each`
+-- is the actual price used for this session and is independent of the
+-- type's `base_price`.
 --
 -- Court fee is one of two modes:
 --   'per_person' → everyone pays court_fee_per_slot
@@ -41,8 +59,9 @@ create table sessions (
   court_fee_mode text not null check (court_fee_mode in ('per_person', 'split')) default 'per_person',
   court_fee_per_slot numeric(10,2) not null default 175,   -- used when court_fee_mode = 'per_person'
   court_fee_total numeric(10,2) not null default 0,         -- used when court_fee_mode = 'split'
+  shuttle_type_id uuid references shuttle_types(id) on delete set null,
   shuttle_count numeric(10,2) not null default 0,           -- shuttles used this session
-  shuttle_price_each numeric(10,2) not null default 0,      -- price per shuttle
+  shuttle_price_each numeric(10,2) not null default 0,      -- price per shuttle, this session
   guest_fixed_rate numeric(10,2) not null default 300,
   notes text,
   created_at timestamptz not null default now()
@@ -168,6 +187,7 @@ left join direct_extras de on de.payment_group_id = pg.id;
 -- ─────────────────────────────────────────────
 alter table players enable row level security;
 alter table player_groups enable row level security;
+alter table shuttle_types enable row level security;
 alter table sessions enable row level security;
 alter table payment_groups enable row level security;
 alter table extra_costs enable row level security;
@@ -175,6 +195,9 @@ alter table fund_settings enable row level security;
 
 create policy "authenticated read players" on players for select using (auth.role() = 'authenticated');
 create policy "authenticated write players" on players for all using (auth.role() = 'authenticated');
+
+create policy "authenticated read shuttle_types" on shuttle_types for select using (auth.role() = 'authenticated');
+create policy "authenticated write shuttle_types" on shuttle_types for all using (auth.role() = 'authenticated');
 
 create policy "authenticated read player_groups" on player_groups for select using (auth.role() = 'authenticated');
 create policy "authenticated write player_groups" on player_groups for all using (auth.role() = 'authenticated');
