@@ -148,6 +148,7 @@ export default function SessionPage() {
   const [extras, setExtras] = useState([])
   const [players, setPlayers] = useState([])
   const [playerGroups, setPlayerGroups] = useState([])
+  const [shuttleTypes, setShuttleTypes] = useState([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(() => new Set())
   const [syncing, setSyncing] = useState(false)
@@ -268,6 +269,13 @@ export default function SessionPage() {
 
     const { data: pgroups } = await supabase.from('player_groups').select('*')
     setPlayerGroups(pgroups || [])
+
+    const { data: stypes } = await supabase
+      .from('shuttle_types')
+      .select('*')
+      .eq('active', true)
+      .order('name')
+    setShuttleTypes(stypes || [])
 
     // A date can hold several sessions — oldest first, so "Session 1" is the
     // one that was started first.
@@ -432,6 +440,58 @@ export default function SessionPage() {
         .eq('id', targetId)
       setSaveError(error ? `Couldn't save ${field.replace(/_/g, ' ')} — ${error.message}` : '')
     }, 500)
+  }
+
+  // Picking a type sets it on the session and suggests that type's base
+  // price — the price field itself stays independently editable so it can
+  // still vary session to session (bulk deals, price hikes, etc.).
+  function selectShuttleType(typeId) {
+    updateSessionField('shuttle_type_id', typeId || null)
+    if (typeId) {
+      const type = shuttleTypes.find((t) => t.id === typeId)
+      if (type) updateSessionField('shuttle_price_each', Number(type.base_price) || 0)
+    }
+  }
+
+  async function addShuttleType() {
+    const name = window.prompt('New shuttle type (e.g. "Yonex Mavis 350"):')
+    if (name == null || !name.trim()) return
+    const priceText = window.prompt(`Base price for "${name.trim()}":`, '0')
+    if (priceText == null) return
+    const base_price = Number(priceText) || 0
+    const { data, error } = await supabase
+      .from('shuttle_types')
+      .insert({ name: name.trim(), base_price })
+      .select()
+      .single()
+    if (error) {
+      alert(error.message)
+      return
+    }
+    setShuttleTypes((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+    selectShuttleType(data.id)
+  }
+
+  async function editShuttleTypePrice(type) {
+    const priceText = window.prompt(`Base price for "${type.name}":`, String(type.base_price))
+    if (priceText == null) return
+    const base_price = Number(priceText) || 0
+    const { error } = await supabase.from('shuttle_types').update({ base_price }).eq('id', type.id)
+    if (error) {
+      alert(error.message)
+      return
+    }
+    setShuttleTypes((prev) => prev.map((t) => (t.id === type.id ? { ...t, base_price } : t)))
+  }
+
+  async function deleteShuttleType(type) {
+    if (!window.confirm(`Delete shuttle type "${type.name}"? Sessions using it keep their price, just lose the label.`)) return
+    const { error } = await supabase.from('shuttle_types').delete().eq('id', type.id)
+    if (error) {
+      alert(error.message)
+      return
+    }
+    setShuttleTypes((prev) => prev.filter((t) => t.id !== type.id))
   }
 
   // ── Roster ───────────────────────────────────────────────────────
@@ -919,6 +979,22 @@ export default function SessionPage() {
         </div>
 
         <div className="field-row">
+          <div className="field">
+            <label>Shuttle type</label>
+            <select
+              value={session.shuttle_type_id || ''}
+              onChange={(e) => {
+                if (e.target.value === '__new__') addShuttleType()
+                else selectShuttleType(e.target.value)
+              }}
+            >
+              <option value="">— No type —</option>
+              {shuttleTypes.map((t) => (
+                <option key={t.id} value={t.id}>{t.name} (₱{money(t.base_price)})</option>
+              ))}
+              <option value="__new__">+ Add new type…</option>
+            </select>
+          </div>
           <NumberField
             label="Shuttles used this session"
             step="1"
@@ -927,7 +1003,7 @@ export default function SessionPage() {
             onCommit={(v) => updateSessionField('shuttle_count', v)}
           />
           <NumberField
-            label="Price per shuttle"
+            label="Price per shuttle (this session)"
             step="0.01"
             min="0"
             value={session.shuttle_price_each ?? 0}
@@ -942,6 +1018,19 @@ export default function SessionPage() {
             />
           </div>
         </div>
+
+        {shuttleTypes.length > 0 && (
+          <div className="group-chips" style={{ marginTop: '-4px', marginBottom: '12px' }}>
+            {shuttleTypes.map((t) => (
+              <span className="group-chip" key={t.id}>
+                <span className="group-chip-name">{t.name}</span>
+                <span className="group-chip-count">₱{money(t.base_price)}</span>
+                <button className="danger-link" onClick={() => editShuttleTypePrice(t)}>Edit price</button>
+                <button className="danger-link" onClick={() => deleteShuttleType(t)}>Delete</button>
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="rate-readout">
           <div className="rate-chip">
