@@ -42,6 +42,7 @@ function rowHeight(r) {
  * @param {number} [d.shuttleTotal] - combined cost of every shuttle type
  * @param {Array}  d.rows        - { name, sub, status, paid, partPaid, headcount,
  *                                  adj (costs/credits on this line), funds (guest earnings), amount }
+ * @param {Array}  [d.adjustments] - { label, scope, amount } itemised costs/credits
  * @param {number} d.totalFunds
  * @param {number} [d.totalAccumulated] - all-time guest surplus, this session included
  * @param {(n:number)=>string} d.fmt - peso formatter
@@ -50,6 +51,8 @@ function rowHeight(r) {
 export function drawLedgerCanvas(d) {
   const fmt = d.fmt
   const sh = d.shuttles || []
+  const adj = d.adjustments || []
+  const adjH = adj.length ? 26 + adj.length * 20 + 10 : 0
   const shuttleH = sh.length ? 6 + sh.length * 20 + (sh.length > 1 ? 28 : 0) + 36 : 0
   const rowsH = d.rows.reduce((h, r) => h + rowHeight(r), 0)
   // Figures for the green box. Collected / still-to-collect are left off the
@@ -62,7 +65,7 @@ export function drawLedgerCanvas(d) {
   const boxH = totals.length ? 12 + totals.length * 26 : 0
   // gap above the box + the box + gap to the footer line (or just a gap when there's no box)
   const totalsH = boxH ? 18 + boxH + 20 : 28
-  const H = PAD + 34 + 20 + 22 + 18 + shuttleH + 26 + rowsH + totalsH + 12 + PAD
+  const H = PAD + 34 + 20 + 22 + 18 + shuttleH + 26 + rowsH + adjH + totalsH + 12 + PAD
 
   const canvas = document.createElement('canvas')
   canvas.width = W * SCALE
@@ -238,6 +241,36 @@ export function drawLedgerCanvas(d) {
     ctx.moveTo(L, y - 0.5)
     ctx.lineTo(R, y - 0.5)
     ctx.stroke()
+  }
+
+  // itemised costs & credits, so a payer can see what the figure in their
+  // ADJUSTMENTS column was actually for
+  if (adj.length) {
+    y += 16
+    ctx.fillStyle = C.inkSoft
+    ctx.font = `600 10px ${BODY}`
+    ctx.textAlign = 'left'
+    ctx.fillText('COSTS & CREDITS', L, y)
+    y += 14
+
+    const scopeX = L + 250
+    for (const a of adj) {
+      ctx.textAlign = 'left'
+      ctx.font = `500 12px ${BODY}`
+      ctx.fillStyle = C.ink
+      ctx.fillText(ellipsize(ctx, a.label, 235), L, y + 10)
+
+      ctx.font = `400 11px ${BODY}`
+      ctx.fillStyle = C.inkSoft
+      ctx.fillText(ellipsize(ctx, a.scope, R - 110 - scopeX), scopeX, y + 10)
+
+      ctx.textAlign = 'right'
+      ctx.font = `600 12px ${BODY}`
+      ctx.fillStyle = a.amount < 0 ? C.credit : C.ink
+      ctx.fillText(fmt(a.amount), R, y + 10)
+      y += 20
+    }
+    y += 10
   }
 
   if (boxH) {

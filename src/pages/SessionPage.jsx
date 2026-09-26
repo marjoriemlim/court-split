@@ -976,6 +976,11 @@ export default function SessionPage() {
                 amount: lr.amountToPay,
               }
         ),
+        adjustments: extras.map((x) => ({
+          label: x.label,
+          scope: x.payment_group_id ? targetName(x.payment_group_id) : 'split among everyone',
+          amount: Number(x.amount) || 0,
+        })),
         totalFunds: totals.totalFunds,
         totalAccumulated: accumulatedFunds,
         fmt: peso,
