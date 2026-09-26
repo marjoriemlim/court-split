@@ -957,28 +957,25 @@ export default function SessionPage() {
             ? {
                 name: lr.row.players?.name || 'Unknown',
                 sub: lr.row.members ? `+ ${lr.row.members}` : '',
-                note: lr.calc.extrasTotal !== 0 ? `${peso(lr.calc.extrasTotal)} adj.` : '',
                 status: lr.row.payer_status_snapshot,
                 paid: !!lr.row.paid_at,
                 headcount: lr.row.headcount,
+                adj: lr.calc.extrasTotal,
+                funds: lr.calc.fundsGenerated,
                 amount: lr.calc.amountToPay,
               }
             : {
                 name: lr.title,
                 sub: lr.names.join(' + '),
-                note: lr.extrasTotal !== 0 ? `${peso(lr.extrasTotal)} adj.` : '',
                 status: lr.allGuest ? 'guest' : lr.anyGuest ? 'mixed' : 'regular',
                 paid: lr.allPaid,
                 partPaid: lr.paidCount > 0 && !lr.allPaid,
                 headcount: lr.headcount,
+                adj: lr.extrasTotal,
+                funds: lr.fundsGenerated,
                 amount: lr.amountToPay,
               }
         ),
-        adjustments: extras.map((x) => ({
-          label: x.label,
-          scope: x.payment_group_id ? targetName(x.payment_group_id) : 'split among everyone',
-          amount: Number(x.amount) || 0,
-        })),
         totalFunds: totals.totalFunds,
         totalAccumulated: accumulatedFunds,
         fmt: peso,

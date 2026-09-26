@@ -31,7 +31,7 @@ function ellipsize(ctx, text, maxWidth) {
 }
 
 function rowHeight(r) {
-  return r.sub || r.note ? 46 : 32
+  return r.sub ? 46 : 32
 }
 
 /**
@@ -40,8 +40,8 @@ function rowHeight(r) {
  * @param {string} d.rateLine     - per-person rate summary
  * @param {Array}  [d.shuttles]  - { name, count, cost } one per shuttle type used
  * @param {number} [d.shuttleTotal] - combined cost of every shuttle type
- * @param {Array}  d.rows        - { name, sub, note, status, paid, partPaid, headcount, amount }
- * @param {Array}  d.adjustments  - { label, scope, amount } itemised costs/credits
+ * @param {Array}  d.rows        - { name, sub, status, paid, partPaid, headcount,
+ *                                  adj (costs/credits on this line), funds (guest earnings), amount }
  * @param {number} d.totalFunds
  * @param {number} [d.totalAccumulated] - all-time guest surplus, this session included
  * @param {(n:number)=>string} d.fmt - peso formatter
@@ -49,11 +49,9 @@ function rowHeight(r) {
  */
 export function drawLedgerCanvas(d) {
   const fmt = d.fmt
-  const adj = d.adjustments || []
   const sh = d.shuttles || []
   const shuttleH = sh.length ? 6 + sh.length * 20 + (sh.length > 1 ? 28 : 0) + 36 : 0
   const rowsH = d.rows.reduce((h, r) => h + rowHeight(r), 0)
-  const adjH = adj.length ? 26 + adj.length * 20 + 10 : 0
   // Figures for the green box. Collected / still-to-collect are left off the
   // image on purpose — each payer only needs their own line.
   const totals = []
@@ -64,7 +62,7 @@ export function drawLedgerCanvas(d) {
   const boxH = totals.length ? 12 + totals.length * 26 : 0
   // gap above the box + the box + gap to the footer line (or just a gap when there's no box)
   const totalsH = boxH ? 18 + boxH + 20 : 28
-  const H = PAD + 34 + 20 + 22 + 18 + shuttleH + 26 + rowsH + adjH + totalsH + 12 + PAD
+  const H = PAD + 34 + 20 + 22 + 18 + shuttleH + 26 + rowsH + totalsH + 12 + PAD
 
   const canvas = document.createElement('canvas')
   canvas.width = W * SCALE
@@ -153,13 +151,28 @@ export function drawLedgerCanvas(d) {
     y += 36
   }
 
+  // Columns are right-aligned and laid out from the amount inwards; the
+  // adjustment and guest-earnings columns only appear when some row has one.
+  const nonZero = (n) => Math.abs(Number(n) || 0) > 0.005
+  const showAdj = d.rows.some((r) => nonZero(r.adj))
+  const showEarn = d.rows.some((r) => nonZero(r.funds))
+  let cx = R - 120
+  const earnX = showEarn ? cx : null
+  if (showEarn) cx -= 105
+  const adjX = showAdj ? cx : null
+  if (showAdj) cx -= 95
+  const paxX = cx - 10
+  const nameMax = paxX - 40 - L
+
   // column headers
   ctx.fillStyle = C.inkSoft
   ctx.font = `600 10px ${BODY}`
   ctx.textAlign = 'left'
   ctx.fillText('PAYER', L, y)
   ctx.textAlign = 'right'
-  ctx.fillText('PAX', R - 130, y)
+  ctx.fillText('PAX', paxX, y)
+  if (showAdj) ctx.fillText('ADJUSTMENTS', adjX, y)
+  if (showEarn) ctx.fillText('GUEST EARNINGS', earnX, y)
   ctx.fillText('AMOUNT', R, y)
   y += 8
 
@@ -175,7 +188,6 @@ export function drawLedgerCanvas(d) {
     ctx.textAlign = 'left'
     ctx.fillStyle = C.ink
     ctx.font = `600 14px ${BODY}`
-    const nameMax = R - L - 190
     // leave room for the tags so they never run into the PAX column
     const tagRoom = (r.status !== 'regular' ? 45 : 0) + (r.paid || r.partPaid ? 65 : 0)
     const name = ellipsize(ctx, r.name, nameMax - tagRoom)
@@ -200,17 +212,20 @@ export function drawLedgerCanvas(d) {
       ctx.fillStyle = C.inkSoft
       ctx.fillText(ellipsize(ctx, r.sub, nameMax), L, baseline + 15)
     }
-    if (r.note) {
-      ctx.font = `400 11px ${BODY}`
-      ctx.fillStyle = r.note.startsWith('-') ? C.credit : C.inkSoft
-      ctx.textAlign = 'right'
-      ctx.fillText(r.note, R, baseline + 15)
-    }
-
     ctx.textAlign = 'right'
     ctx.fillStyle = C.inkSoft
     ctx.font = `400 13px ${BODY}`
-    ctx.fillText(String(r.headcount), R - 130, baseline)
+    ctx.fillText(String(r.headcount), paxX, baseline)
+
+    ctx.font = `500 13px ${BODY}`
+    if (showAdj && nonZero(r.adj)) {
+      ctx.fillStyle = r.adj < 0 ? C.credit : C.inkSoft
+      ctx.fillText(fmt(r.adj), adjX, baseline)
+    }
+    if (showEarn && nonZero(r.funds)) {
+      ctx.fillStyle = r.funds < 0 ? '#a3402f' : '#7a5a12'
+      ctx.fillText(fmt(r.funds), earnX, baseline)
+    }
 
     ctx.fillStyle = r.amount < 0 ? C.credit : C.ink
     ctx.font = `600 15px ${BODY}`
@@ -223,36 +238,6 @@ export function drawLedgerCanvas(d) {
     ctx.moveTo(L, y - 0.5)
     ctx.lineTo(R, y - 0.5)
     ctx.stroke()
-  }
-
-  // itemised costs & credits, so a payer can see what the "adj." on their
-  // line was actually for
-  if (adj.length) {
-    y += 16
-    ctx.fillStyle = C.inkSoft
-    ctx.font = `600 10px ${BODY}`
-    ctx.textAlign = 'left'
-    ctx.fillText('COSTS & CREDITS', L, y)
-    y += 14
-
-    const scopeX = L + 250
-    for (const a of adj) {
-      ctx.textAlign = 'left'
-      ctx.font = `500 12px ${BODY}`
-      ctx.fillStyle = C.ink
-      ctx.fillText(ellipsize(ctx, a.label, 235), L, y + 10)
-
-      ctx.font = `400 11px ${BODY}`
-      ctx.fillStyle = C.inkSoft
-      ctx.fillText(ellipsize(ctx, a.scope, R - 110 - scopeX), scopeX, y + 10)
-
-      ctx.textAlign = 'right'
-      ctx.font = `600 12px ${BODY}`
-      ctx.fillStyle = a.amount < 0 ? C.credit : C.ink
-      ctx.fillText(fmt(a.amount), R, y + 10)
-      y += 20
-    }
-    y += 10
   }
 
   if (boxH) {
