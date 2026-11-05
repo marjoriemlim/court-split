@@ -38,6 +38,30 @@ const prettyDate = (dateStr) => {
 
 const clock = (t) => new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 const minutesSince = (t, now) => Math.max(0, Math.floor((now - new Date(t).getTime()) / 60000))
+const minutesUntil = (t, now) => Math.max(0, Math.ceil((new Date(t).getTime() - now) / 60000))
+
+const SIT_OUT_CHOICES = [
+  { value: '30', label: 'Rest 30 min' },
+  { value: '60', label: 'Rest 1 hour' },
+  { value: 'open', label: 'Rest until I bring them back' },
+  { value: 'left', label: 'Left for the night' },
+]
+
+// A one-tap menu that resets itself after each pick.
+function SitOutPicker({ entry, disabled, onPick }) {
+  return (
+    <select className="inline-select sit-out" value="" disabled={disabled}
+      aria-label={`Sit ${entry.display_name} out`}
+      onChange={(e) => {
+        const v = e.target.value
+        if (!v) return
+        onPick(entry, v === 'open' || v === 'left' ? v : Number(v))
+      }}>
+      <option value="">Sit out…</option>
+      {SIT_OUT_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+    </select>
+  )
+}
 
 function RankBadge({ rank }) {
   return <span className={`rank-badge rank-${rank || 'beginner'}`}>{rankLabel(rank)}</span>
@@ -266,7 +290,10 @@ export default function QueuePage() {
   const checkedIn = entries.filter((e) => e.state !== 'left')
   const suggested = new Set(Object.values(suggestions).flatMap((s) => [...s.teamA, ...s.teamB]))
   const unassigned = ready.filter((e) => !suggested.has(e.id)).length
-  const resting = entries.filter((e) => e.state === 'resting' && !readyIds.has(e.id) && !onCourt.has(e.id))
+  const resting = entries
+    .filter((e) => e.state === 'resting' && !readyIds.has(e.id) && !onCourt.has(e.id))
+    .sort((x, y) => (x.resting_until ? new Date(x.resting_until) : Infinity) - (y.resting_until ? new Date(y.resting_until) : Infinity))
+  const gone = entries.filter((e) => e.state === 'left')
 
   // ── Actions ──────────────────────────────────────────────────────
   const setCourtCount = (n) =>
@@ -386,6 +413,41 @@ export default function QueuePage() {
       return err
     })
   }
+
+  // Forget any hand-picked line-up that includes this player.
+  const dropFromDrafts = (id) =>
+    setDrafts((prev) => {
+      const next = {}
+      for (const [c, d] of Object.entries(prev)) {
+        if (![...d.teamA, ...d.teamB].includes(id)) next[c] = d
+      }
+      return next
+    })
+
+  // choice: minutes to rest, 'open' to rest until brought back, or 'left'.
+  const sitOut = (entry, choice) =>
+    run(async () => {
+      if (onCourt.has(entry.id)) return new Error(`${entry.display_name} is on court. Finish that game first.`)
+      dropFromDrafts(entry.id)
+      const update =
+        choice === 'left'
+          ? { state: 'left', resting_until: null }
+          : {
+              state: 'resting',
+              resting_until: choice === 'open' ? null : new Date(Date.now() + choice * 60000).toISOString(),
+            }
+      const { error: err } = await supabase.from('queue_entries').update(update).eq('id', entry.id)
+      return err
+    })
+
+  // Back from a rest (or back after leaving): joins the end of the line.
+  const bringBack = (entry) =>
+    run(async () => {
+      const { error: err } = await supabase.from('queue_entries')
+        .update({ state: 'waiting', resting_until: null, available_since: new Date().toISOString() })
+        .eq('id', entry.id)
+      return err
+    })
 
   const editSlot = (court_no, s, team, idx, id) => {
     const next = { teamA: [...s.teamA], teamB: [...s.teamB] }
@@ -581,7 +643,7 @@ export default function QueuePage() {
           <h2>In line</h2>
           <span className="muted">{ready.length} waiting · {onCourt.size} on court</span>
         </div>
-        {ready.length === 0 && resting.length === 0 ? (
+        {ready.length === 0 ? (
           <p className="muted">Nobody waiting.</p>
         ) : (
           <ol className="queue-list">
@@ -592,22 +654,61 @@ export default function QueuePage() {
                   onChange={(ev) => setEntryRank(e, ev.target.value)} aria-label={`${e.display_name}'s rank tonight`}>
                   {RANKS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
-                <span className="muted">
+                <span className="muted queue-meta">
                   {history.gamesPlayed(e.id)} game{history.gamesPlayed(e.id) === 1 ? '' : 's'} ·
                   waiting {minutesSince(e.waitingSince, now)} min
+                  {e.state === 'resting' && ' · back from rest'}
                 </span>
-              </li>
-            ))}
-            {resting.map((e) => (
-              <li key={e.id} className="queue-resting">
-                <span className="queue-name">{e.display_name}</span>
-                <RankBadge rank={e.rank} />
-                <span className="muted">
-                  Resting{e.resting_until ? ` · back at ${clock(e.resting_until)}` : ''}
-                </span>
+                <SitOutPicker entry={e} disabled={busy} onPick={sitOut} />
               </li>
             ))}
           </ol>
+        )}
+
+        {resting.length > 0 && (
+          <>
+            <h3 className="queue-subhead">Sitting out</h3>
+            <ul className="queue-list plain">
+              {resting.map((e) => (
+                <li key={e.id} className="queue-resting">
+                  <span className="queue-name">{e.display_name}</span>
+                  <RankBadge rank={e.rank} />
+                  <span className="muted queue-meta">
+                    {e.resting_until
+                      ? `Back at ${clock(e.resting_until)} · ${minutesUntil(e.resting_until, now)} min left`
+                      : 'Until you bring them back'}
+                  </span>
+                  <span className="row-actions">
+                    <button className="link-btn" disabled={busy} onClick={() => bringBack(e)}>Back now</button>
+                    <button className="danger-link" disabled={busy} onClick={() => sitOut(e, 'left')}>Left</button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {gone.length > 0 && (
+          <>
+            <h3 className="queue-subhead">Left for the night</h3>
+            <ul className="queue-list plain">
+              {gone.map((e) => (
+                <li key={e.id} className="queue-resting">
+                  <span className="queue-name">{e.display_name}</span>
+                  <span className="muted queue-meta">
+                    {history.gamesPlayed(e.id)} game{history.gamesPlayed(e.id) === 1 ? '' : 's'}
+                  </span>
+                  <span className="row-actions">
+                    <button className="link-btn" disabled={busy} onClick={() => bringBack(e)}>Back in</button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {onCourt.size > 0 && (
+          <p className="hint">Players on court can sit out once their game is finished.</p>
         )}
       </div>
 

@@ -890,3 +890,17 @@ table.ledger a { color: var(--court-green); font-weight: 600; }
   .court-actions button.link-btn { width: 100%; text-align: center; padding: 6px 0; }
   .winner-pick .session-tab { flex: 1; }
 }
+
+.queue-subhead {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin: 18px 0 4px;
+}
+.queue-list.plain { list-style: none; padding-left: 0; }
+.queue-list .queue-meta { flex: 1; }
+.queue-list .row-actions { gap: 14px; }
+.queue-resting { opacity: 1; }
+.queue-resting .queue-name { color: var(--ink-soft); }
+.sit-out { color: var(--ink-soft); }
