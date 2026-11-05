@@ -253,7 +253,109 @@ update sessions s
    and (s.shuttle_count <> 0 or s.shuttle_price_each <> 0);
 
 -- ---------------------------------------------------------------
--- 10. Tell PostgREST to pick up the new columns immediately
+-- 10. Queue master: courts, skill ranks, the night's queue, matches
+-- ---------------------------------------------------------------
+
+-- Skill rank on the permanent roster: newbie < beginner < intermediate < advanced.
+alter table players
+  add column if not exists rank text not null default 'beginner';
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'players_rank_check') then
+    alter table players add constraint players_rank_check
+      check (rank in ('newbie', 'beginner', 'intermediate', 'advanced'));
+  end if;
+end $$;
+
+-- How many courts the session has booked.
+alter table sessions
+  add column if not exists court_count int not null default 2;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'sessions_court_count_check') then
+    alter table sessions add constraint sessions_court_count_check
+      check (court_count between 1 and 20);
+  end if;
+end $$;
+
+-- QUEUE ENTRIES: who is checked in to play this session. player_id links to
+-- the roster when there is one; quick-added friends just have a name.
+-- `rank` is a per-night copy of the player's rank, so it can be overridden.
+-- "Playing" isn't stored: it's whoever is in an in-progress match.
+--   waiting -> in the queue, ordered by available_since (oldest first)
+--   resting -> sitting out; back in the queue once resting_until passes
+--              (null resting_until = until the queue master brings them back)
+--   left    -> gone for the night, stats kept
+create table if not exists queue_entries (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references sessions(id) on delete cascade,
+  player_id uuid references players(id) on delete set null,
+  display_name text not null,
+  rank text not null default 'beginner'
+    check (rank in ('newbie', 'beginner', 'intermediate', 'advanced')),
+  state text not null default 'waiting'
+    check (state in ('waiting', 'resting', 'left')),
+  available_since timestamptz not null default now(),
+  resting_until timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists queue_entries_session_idx on queue_entries (session_id);
+create index if not exists queue_entries_player_idx on queue_entries (player_id);
+-- A roster player can only be checked in once per session.
+create unique index if not exists queue_entries_session_player_key
+  on queue_entries (session_id, player_id) where player_id is not null;
+
+-- MATCHES: one game on one court. Scores stay null until the game ends.
+create table if not exists matches (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references sessions(id) on delete cascade,
+  court_no int not null check (court_no > 0),
+  status text not null default 'in_progress'
+    check (status in ('in_progress', 'done', 'void')),
+  team_a_score int check (team_a_score between 0 and 99),
+  team_b_score int check (team_b_score between 0 and 99),
+  winner text check (winner in ('a', 'b')),
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists matches_session_idx on matches (session_id);
+
+-- MATCH PLAYERS: who was on which side of each match.
+create table if not exists match_players (
+  match_id uuid not null references matches(id) on delete cascade,
+  entry_id uuid not null references queue_entries(id) on delete restrict,
+  team text not null check (team in ('a', 'b')),
+  primary key (match_id, entry_id)
+);
+
+create index if not exists match_players_entry_idx on match_players (entry_id);
+
+alter table queue_entries enable row level security;
+alter table matches       enable row level security;
+alter table match_players enable row level security;
+
+drop policy if exists "authenticated read queue_entries"  on queue_entries;
+drop policy if exists "authenticated write queue_entries" on queue_entries;
+create policy "authenticated read queue_entries"  on queue_entries for select using (auth.role() = 'authenticated');
+create policy "authenticated write queue_entries" on queue_entries for all    using (auth.role() = 'authenticated');
+
+drop policy if exists "authenticated read matches"  on matches;
+drop policy if exists "authenticated write matches" on matches;
+create policy "authenticated read matches"  on matches for select using (auth.role() = 'authenticated');
+create policy "authenticated write matches" on matches for all    using (auth.role() = 'authenticated');
+
+drop policy if exists "authenticated read match_players"  on match_players;
+drop policy if exists "authenticated write match_players" on match_players;
+create policy "authenticated read match_players"  on match_players for select using (auth.role() = 'authenticated');
+create policy "authenticated write match_players" on match_players for all    using (auth.role() = 'authenticated');
+
+-- ---------------------------------------------------------------
+-- 11. Tell PostgREST to pick up the new columns immediately
 --    (this is what the "schema cache" error is about)
 -- ---------------------------------------------------------------
 notify pgrst, 'reload schema';
