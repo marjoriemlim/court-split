@@ -12,6 +12,7 @@ import {
   queueOrder,
   pickNextMatch,
   describeMatch,
+  nightSummary,
   SCORING,
 } from '../lib/queue'
 
@@ -62,6 +63,18 @@ function SitOutPicker({ entry, disabled, onPick }) {
     </select>
   )
 }
+
+// "Ben ×2, Cy, Dee": repeats get a count so they stand out.
+const peopleList = (people) =>
+  people.length === 0
+    ? '—'
+    : people.map((p, i) => (
+        <span key={p.entry.id}>
+          {i > 0 && ', '}
+          {p.entry.display_name}
+          {p.count > 1 && <strong className="repeat-count"> ×{p.count}</strong>}
+        </span>
+      ))
 
 function RankBadge({ rank }) {
   return <span className={`rank-badge rank-${rank || 'beginner'}`}>{rankLabel(rank)}</span>
@@ -285,6 +298,7 @@ export default function QueuePage() {
 
   const liveByCourt = new Map(matches.filter((m) => m.status === 'in_progress').map((m) => [m.court_no, m]))
   const finished = matches.filter((m) => m.status === 'done').slice().reverse()
+  const summary = nightSummary(matches, entries)
   const entryByPlayer = new Map(entries.filter((e) => e.player_id).map((e) => [e.player_id, e]))
   const missingPayers = players.filter((p) => payerIds.includes(p.id) && !entryByPlayer.has(p.id))
   const checkedIn = entries.filter((e) => e.state !== 'left')
@@ -797,10 +811,60 @@ export default function QueuePage() {
             })}
           </ul>
         )}
-        <p className="hint">
-          Payments for this night are on the <Link to={isToday ? '/' : `/session/${date}`}>Session tab</Link>.
-        </p>
       </div>
+
+      {summary.games > 0 && (
+        <div className="panel">
+          <div className="panel-head">
+            <h2>Night summary</h2>
+            <span className="muted">
+              {summary.games} game{summary.games === 1 ? '' : 's'} · {summary.pairings.distinct} different
+              partnership{summary.pairings.distinct === 1 ? '' : 's'}
+              {summary.pairings.repeats > 0
+                ? ` · ${summary.pairings.repeats} repeat${summary.pairings.repeats === 1 ? '' : 's'}`
+                : ' · no repeat partners'}
+            </span>
+          </div>
+          <div className="table-wrap">
+            <table className="ledger summary-table">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th className="num">Games</th>
+                  <th className="num">W–L</th>
+                  <th className="num">Points</th>
+                  <th>Partnered</th>
+                  <th>Played against</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.players.map((r) => (
+                  <tr key={r.entry.id}>
+                    <td>
+                      <strong>{r.entry.display_name}</strong>
+                      {r.entry.rank && <div className="sub-note">{rankLabel(r.entry.rank)}</div>}
+                    </td>
+                    <td className="num">{r.games}</td>
+                    <td className="num">{r.wins}–{r.losses}</td>
+                    <td className="num">
+                      {r.pointsFor}–{r.pointsAgainst}
+                      <div className="sub-note">
+                        {r.pointsFor - r.pointsAgainst > 0 ? '+' : ''}{r.pointsFor - r.pointsAgainst}
+                      </div>
+                    </td>
+                    <td className="people-cell">{peopleList(r.partners)}</td>
+                    <td className="people-cell">{peopleList(r.opponents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <p className="hint">
+        Payments for this night are on the <Link to={isToday ? '/' : `/session/${date}`}>Session tab</Link>.
+      </p>
     </div>
   )
 }

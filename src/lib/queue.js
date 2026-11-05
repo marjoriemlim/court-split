@@ -291,6 +291,81 @@ export function describeMatch(teamA, teamB, history) {
   return notes
 }
 
+// ─────────────────────────────────────────────
+// Night summary
+// ─────────────────────────────────────────────
+
+/**
+ * Per-player record for the night, from finished games only.
+ * @returns {{
+ *   players: Array<{ entry, games, wins, losses, pointsFor, pointsAgainst,
+ *                    partners: Array<{ entry, count }>, opponents: Array<{ entry, count }> }>,
+ *   games: number,
+ *   pairings: { distinct: number, repeats: number },
+ * }}
+ *   players are sorted by wins, then win rate, then name. Partner and
+ *   opponent lists are sorted most-often first.
+ */
+export function nightSummary(matches, entries) {
+  const done = (matches || []).filter((m) => m.status === 'done')
+  const byId = new Map((entries || []).map((e) => [e.id, e]))
+  const rows = new Map()
+  const row = (id) => {
+    if (!rows.has(id)) {
+      rows.set(id, {
+        entry: byId.get(id) ?? { id, display_name: '?' },
+        games: 0, wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0,
+        partners: new Map(), opponents: new Map(),
+      })
+    }
+    return rows.get(id)
+  }
+  const bump = (map, id) => map.set(id, (map.get(id) || 0) + 1)
+
+  for (const m of done) {
+    for (const [side, team, other, mine, theirs] of [
+      ['a', m.teamA, m.teamB, m.team_a_score, m.team_b_score],
+      ['b', m.teamB, m.teamA, m.team_b_score, m.team_a_score],
+    ]) {
+      for (const id of team) {
+        const r = row(id)
+        r.games++
+        if (m.winner === side) r.wins++
+        else if (m.winner) r.losses++
+        r.pointsFor += Number(mine) || 0
+        r.pointsAgainst += Number(theirs) || 0
+        for (const p of team) if (p !== id) bump(r.partners, p)
+        for (const o of other) bump(r.opponents, o)
+      }
+    }
+  }
+
+  const list = (map) =>
+    [...map.entries()]
+      .map(([id, count]) => ({ entry: byId.get(id) ?? { id, display_name: '?' }, count }))
+      .sort((x, y) => y.count - x.count || String(x.entry.display_name).localeCompare(String(y.entry.display_name)))
+
+  const players = [...rows.values()]
+    .map((r) => ({ ...r, partners: list(r.partners), opponents: list(r.opponents) }))
+    .sort(
+      (x, y) =>
+        y.wins - x.wins ||
+        y.wins / (y.games || 1) - x.wins / (x.games || 1) ||
+        String(x.entry.display_name).localeCompare(String(y.entry.display_name))
+    )
+
+  const history = buildHistory(done)
+  const counts = [...history.partners.values()]
+  return {
+    players,
+    games: done.length,
+    pairings: {
+      distinct: counts.length,
+      repeats: counts.reduce((sum, c) => sum + c - 1, 0),
+    },
+  }
+}
+
 /**
  * Fill every free court at once. Each court takes the best match from whoever
  * the earlier courts left over.

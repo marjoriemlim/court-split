@@ -904,3 +904,7 @@ table.ledger a { color: var(--court-green); font-weight: 600; }
 .queue-resting { opacity: 1; }
 .queue-resting .queue-name { color: var(--ink-soft); }
 .sit-out { color: var(--ink-soft); }
+
+.summary-table .people-cell { font-size: 13px; min-width: 140px; }
+.repeat-count { color: #8a5a12; }
+.summary-table th.num, .summary-table td.num { white-space: nowrap; }
