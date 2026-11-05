@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Players from './pages/Players'
 import SessionPage from './pages/SessionPage'
 import History from './pages/History'
+import QueuePage from './pages/QueuePage'
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = loading
@@ -44,6 +45,9 @@ export default function App() {
         <NavLink to="/" end className={onSessionTab ? 'active' : ''}>
           Session
         </NavLink>
+        <NavLink to="/queue" className={({ isActive }) => (isActive ? 'active' : '')}>
+          Queue
+        </NavLink>
         <NavLink to="/players" className={({ isActive }) => (isActive ? 'active' : '')}>
           Players
         </NavLink>
@@ -55,6 +59,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<SessionPage />} />
         <Route path="/session/:date" element={<SessionPage />} />
+        <Route path="/queue" element={<QueuePage />} />
+        <Route path="/queue/:date" element={<QueuePage />} />
         <Route path="/players" element={<Players />} />
         <Route path="/history" element={<History />} />
         <Route path="*" element={<Navigate to="/" replace />} />
