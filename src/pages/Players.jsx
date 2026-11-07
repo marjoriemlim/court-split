@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { RANKS } from '../lib/queue'
 
 export default function Players() {
   const [players, setPlayers] = useState([])
   const [groups, setGroups] = useState([])
   const [name, setName] = useState('')
   const [status, setStatus] = useState('regular')
+  const [rank, setRank] = useState('beginner')
   const [groupId, setGroupId] = useState('')
   const [newGroup, setNewGroup] = useState('')
   const [loading, setLoading] = useState(true)
@@ -50,10 +52,11 @@ export default function Players() {
     if (!name.trim()) return
     const { error } = await supabase
       .from('players')
-      .insert({ name: name.trim(), status, group_id: groupId || null })
+      .insert({ name: name.trim(), status, rank, group_id: groupId || null })
     if (!error) {
       setName('')
       setStatus('regular')
+      setRank('beginner')
       setGroupId('')
       load()
     } else {
@@ -95,6 +98,12 @@ export default function Players() {
     await supabase.from('players').update({ group_id }).eq('id', player.id)
   }
 
+  async function setPlayerRank(player, value) {
+    setPlayers((prev) => prev.map((p) => (p.id === player.id ? { ...p, rank: value } : p)))
+    const { error } = await supabase.from('players').update({ rank: value }).eq('id', player.id)
+    if (error) alert(error.message)
+  }
+
   async function toggleStatus(player) {
     const newStatus = player.status === 'regular' ? 'guest' : 'regular'
     await supabase.from('players').update({ status: newStatus }).eq('id', player.id)
@@ -121,6 +130,14 @@ export default function Players() {
               <select value={status} onChange={(e) => setStatus(e.target.value)}>
                 <option value="regular">Regular</option>
                 <option value="guest">Guest</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Rank</label>
+              <select value={rank} onChange={(e) => setRank(e.target.value)}>
+                {RANKS.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
               </select>
             </div>
             <div className="field">
@@ -187,6 +204,7 @@ export default function Players() {
                 <tr>
                   <th>Name</th>
                   <th>Group</th>
+                  <th>Rank</th>
                   <th>Status</th>
                   <th>Active</th>
                   <th></th>
@@ -196,7 +214,7 @@ export default function Players() {
                 section.players.length === 0 ? null : (
                   <tbody key={section.id ?? 'none'}>
                     <tr className="group-head">
-                      <td colSpan={5}>
+                      <td colSpan={6}>
                         {section.name}
                         <span className="group-head-count"> · {section.players.length}</span>
                       </td>
@@ -213,6 +231,18 @@ export default function Players() {
                             <option value="">— No group —</option>
                             {groups.map((g) => (
                               <option key={g.id} value={g.id}>{g.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <select
+                            className="inline-select"
+                            value={p.rank || 'beginner'}
+                            onChange={(e) => setPlayerRank(p, e.target.value)}
+                            aria-label={`${p.name}'s rank`}
+                          >
+                            {RANKS.map((r) => (
+                              <option key={r.value} value={r.value}>{r.label}</option>
                             ))}
                           </select>
                         </td>

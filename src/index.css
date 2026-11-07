@@ -791,3 +791,120 @@ table.ledger a { color: var(--court-green); font-weight: 600; }
   color: var(--court-green);
   font-weight: 700;
 }
+
+/* ── Queue ─────────────────────────────────────────── */
+.rank-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.rank-newbie { background: #eef0ec; color: #4d5a54; }
+.rank-beginner { background: #e2ede6; color: var(--court-green); }
+.rank-intermediate { background: #f6e8c8; color: #6b4e12; }
+.rank-advanced { background: var(--court-green); color: white; }
+.roster-chip.on .rank-badge { opacity: 0.9; }
+
+.stepper { display: flex; align-items: center; gap: 10px; }
+.stepper button.ghost { width: auto; padding: 4px 12px; font-size: 16px; }
+.stepper span { font-weight: 600; min-width: 64px; text-align: center; }
+
+.court-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.court-card {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--paper);
+}
+.court-card.live {
+  border: 2px solid var(--court-green);
+  background: #f2f7f3;
+}
+.court-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+.court-card-head h3 { margin: 0; font-family: var(--font-display); font-size: 18px; }
+.team { display: flex; flex-direction: column; gap: 6px; }
+.team .inline-select { width: 100%; }
+.team-player { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 500; }
+.vs {
+  text-align: center;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+  margin: 6px 0;
+}
+.note-list { margin: 10px 0 0; padding-left: 18px; font-size: 12px; color: var(--ink-soft); }
+.court-actions { margin-top: 12px; flex-wrap: wrap; align-items: center; }
+
+.score-form { display: flex; flex-direction: column; gap: 12px; }
+.score-inputs { display: flex; align-items: flex-end; gap: 8px; }
+.score-inputs label { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-soft); }
+.score-inputs input {
+  font-size: 24px;
+  font-weight: 600;
+  text-align: center;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.score-dash { font-size: 24px; padding-bottom: 10px; }
+.winner-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.score-warning { color: #8a5a12; margin: 0; }
+
+.queue-list { margin: 0; padding-left: 22px; }
+.queue-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.queue-list li:last-child { border-bottom: none; }
+.queue-name { font-weight: 600; min-width: 90px; }
+.queue-resting { opacity: 0.6; list-style: none; }
+
+.game-list { list-style: none; margin: 0; padding: 0; }
+.game-list li { padding: 8px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.game-list li:last-child { border-bottom: none; }
+.game-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.game-line .winner { font-weight: 700; color: var(--court-green); }
+.game-score { font-variant-numeric: tabular-nums; }
+
+@media (max-width: 640px) {
+  .court-grid { grid-template-columns: 1fr; }
+  .court-actions button.danger-link,
+  .court-actions button.link-btn { width: 100%; text-align: center; padding: 6px 0; }
+  .winner-pick .session-tab { flex: 1; }
+}
+
+.queue-subhead {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin: 18px 0 4px;
+}
+.queue-list.plain { list-style: none; padding-left: 0; }
+.queue-list .queue-meta { flex: 1; }
+.queue-list .row-actions { gap: 14px; }
+.queue-resting { opacity: 1; }
+.queue-resting .queue-name { color: var(--ink-soft); }
+.sit-out { color: var(--ink-soft); }
+
+.summary-table .people-cell { font-size: 13px; min-width: 140px; }
+.repeat-count { color: #8a5a12; }
+.summary-table th.num, .summary-table td.num { white-space: nowrap; }

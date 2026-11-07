@@ -20,6 +20,9 @@ create table players (
   status text not null check (status in ('regular', 'guest')) default 'regular',
   active boolean not null default true,
   group_id uuid references player_groups(id) on delete set null,
+  -- skill level, used to balance teams in the queue: newbie < beginner < intermediate < advanced
+  rank text not null default 'beginner'
+    check (rank in ('newbie', 'beginner', 'intermediate', 'advanced')),
   created_at timestamptz not null default now()
 );
 
@@ -70,6 +73,7 @@ create table sessions (
   shuttle_price_each numeric(10,2) not null default 0,      -- price per shuttle, this session
   shuttles jsonb not null default '[]'::jsonb,              -- shuttle lines, see above
   guest_fixed_rate numeric(10,2) not null default 300,
+  court_count int not null default 2 check (court_count between 1 and 20), -- courts booked, for the queue
   notes text,
   created_at timestamptz not null default now()
 );
@@ -116,6 +120,67 @@ create table fund_settings (
   opening_as_of date,                              -- balance is as of the END of this day
   updated_at timestamptz not null default now()
 );
+
+-- ─────────────────────────────────────────────
+-- QUEUE ENTRIES: who is checked in to play this session. player_id links to
+-- the roster when there is one; quick-added friends just have a name.
+-- `rank` is a per-night copy of the player's rank, so it can be overridden.
+-- "Playing" isn't stored: it's whoever is in an in-progress match.
+--   waiting → in the queue, ordered by available_since (oldest first)
+--   resting → sitting out; back in the queue once resting_until passes
+--             (null resting_until = until the queue master brings them back)
+--   left    → gone for the night, stats kept
+-- ─────────────────────────────────────────────
+create table queue_entries (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references sessions(id) on delete cascade,
+  player_id uuid references players(id) on delete set null,
+  display_name text not null,
+  rank text not null default 'beginner'
+    check (rank in ('newbie', 'beginner', 'intermediate', 'advanced')),
+  state text not null default 'waiting'
+    check (state in ('waiting', 'resting', 'left')),
+  available_since timestamptz not null default now(),
+  resting_until timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index queue_entries_session_idx on queue_entries (session_id);
+create index queue_entries_player_idx on queue_entries (player_id);
+-- A roster player can only be checked in once per session.
+create unique index queue_entries_session_player_key
+  on queue_entries (session_id, player_id) where player_id is not null;
+
+-- ─────────────────────────────────────────────
+-- MATCHES: one game on one court. Scores stay null until the game ends.
+-- Games run to 31; from 30-all play continues until a 2-point lead,
+-- capped at 35.
+-- ─────────────────────────────────────────────
+create table matches (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references sessions(id) on delete cascade,
+  court_no int not null check (court_no > 0),
+  status text not null default 'in_progress'
+    check (status in ('in_progress', 'done', 'void')),
+  team_a_score int check (team_a_score between 0 and 99),
+  team_b_score int check (team_b_score between 0 and 99),
+  winner text check (winner in ('a', 'b')),
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index matches_session_idx on matches (session_id);
+
+-- MATCH PLAYERS: who was on which side of each match.
+create table match_players (
+  match_id uuid not null references matches(id) on delete cascade,
+  entry_id uuid not null references queue_entries(id) on delete restrict,
+  team text not null check (team in ('a', 'b')),
+  primary key (match_id, entry_id)
+);
+
+create index match_players_entry_idx on match_players (entry_id);
 
 -- Helpful view: everything pre-calculated, mirrors your spreadsheet.
 -- Per-person court + shuttle rates are derived from session totals divided by
@@ -206,6 +271,9 @@ alter table sessions enable row level security;
 alter table payment_groups enable row level security;
 alter table extra_costs enable row level security;
 alter table fund_settings enable row level security;
+alter table queue_entries enable row level security;
+alter table matches enable row level security;
+alter table match_players enable row level security;
 
 create policy "authenticated read players" on players for select using (auth.role() = 'authenticated');
 create policy "authenticated write players" on players for all using (auth.role() = 'authenticated');
@@ -227,6 +295,15 @@ create policy "authenticated write extras" on extra_costs for all using (auth.ro
 
 create policy "authenticated read fund_settings" on fund_settings for select using (auth.role() = 'authenticated');
 create policy "authenticated write fund_settings" on fund_settings for all using (auth.role() = 'authenticated');
+
+create policy "authenticated read queue_entries" on queue_entries for select using (auth.role() = 'authenticated');
+create policy "authenticated write queue_entries" on queue_entries for all using (auth.role() = 'authenticated');
+
+create policy "authenticated read matches" on matches for select using (auth.role() = 'authenticated');
+create policy "authenticated write matches" on matches for all using (auth.role() = 'authenticated');
+
+create policy "authenticated read match_players" on match_players for select using (auth.role() = 'authenticated');
+create policy "authenticated write match_players" on match_players for all using (auth.role() = 'authenticated');
 
 -- ─────────────────────────────────────────────
 -- ALREADY HAVE A DATABASE?

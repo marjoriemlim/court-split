@@ -9,8 +9,14 @@ import { calcSessionTotals, money } from '../lib/calc'
  * flow stays one-click — those placeholders must not show up as past sessions.
  */
 function hasRecord(session) {
-  return (session.payment_groups || []).length > 0 || (session.extra_costs || []).length > 0
+  return (
+    (session.payment_groups || []).length > 0 ||
+    (session.extra_costs || []).length > 0 ||
+    gamesPlayed(session) > 0
+  )
 }
+
+const gamesPlayed = (session) => (session.matches || []).filter((m) => m.status === 'done').length
 
 export default function History() {
   const [rows, setRows] = useState([])
@@ -21,7 +27,7 @@ export default function History() {
     async function load() {
       const { data: sessions } = await supabase
         .from('sessions')
-        .select('*, payment_groups(*), extra_costs(*)')
+        .select('*, payment_groups(*), extra_costs(*), matches(status)')
         .order('session_date', { ascending: false })
         .order('created_at', { ascending: true }) // morning before evening within a day
 
@@ -73,6 +79,7 @@ export default function History() {
                 <tr>
                   <th>Date</th>
                   <th className="num">Players covered</th>
+                  <th className="num">Games</th>
                   <th className="num">Total collected</th>
                   <th className="num">Funds generated</th>
                 </tr>
@@ -87,6 +94,13 @@ export default function History() {
                     <td className="num">
                       {(r.payment_groups || []).reduce((n, g) => n + g.headcount, 0)}
                     </td>
+                    <td className="num">
+                      {gamesPlayed(r) > 0 ? (
+                        <Link to={`/queue/${r.session_date}`}>{gamesPlayed(r)}</Link>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td className="num">₱{money(r.totals.totalCollected)}</td>
                     <td className="num">₱{money(r.totals.totalFunds)}</td>
                   </tr>
@@ -97,6 +111,7 @@ export default function History() {
                       Carried forward
                       {opening.asOf && <div className="sub-note">as of {opening.asOf}</div>}
                     </td>
+                    <td className="num">—</td>
                     <td className="num">—</td>
                     <td className="num">—</td>
                     <td className="num">₱{money(opening.balance)}</td>
