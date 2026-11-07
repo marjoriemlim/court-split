@@ -158,10 +158,11 @@ export default function SessionPage() {
   const [exporting, setExporting] = useState('') // '' | 'share' | 'download'
 
   // Everything the all-time fund balance needs that isn't the session on screen:
-  // the balance carried in before the app, plus each other session's funds.
+  // the balance carried in before the app, plus each other session's funds,
+  // minus everything withdrawn from the kitty.
   // The session being edited is deliberately excluded — its live total is added
   // in below, so the running balance tracks edits without waiting for a save.
-  const [fundHistory, setFundHistory] = useState({ opening: 0, bySession: {} })
+  const [fundHistory, setFundHistory] = useState({ opening: 0, withdrawn: 0, bySession: {} })
 
   // "covering others" form state
   const [payerId, setPayerId] = useState('')
@@ -333,6 +334,8 @@ export default function SessionPage() {
         .select('opening_balance')
         .maybeSingle()
 
+      const { data: withdrawals } = await supabase.from('fund_withdrawals').select('amount')
+
       const { data: all } = await supabase
         .from('sessions')
         .select('id, court_fee_mode, court_fee_per_slot, court_fee_total, shuttles, shuttle_count, shuttle_price_each, shuttle_type_id, guest_fixed_rate, payment_groups(*), extra_costs(*)')
@@ -342,7 +345,11 @@ export default function SessionPage() {
       for (const s of all || []) {
         bySession[s.id] = calcSessionTotals(s, s.payment_groups || [], s.extra_costs || []).totalFunds
       }
-      setFundHistory({ opening: Number(settings?.opening_balance) || 0, bySession })
+      setFundHistory({
+        opening: Number(settings?.opening_balance) || 0,
+        withdrawn: (withdrawals || []).reduce((sum, w) => sum + Number(w.amount), 0),
+        bySession,
+      })
     })()
     return () => { cancelled = true }
   }, [date])
@@ -826,9 +833,10 @@ export default function SessionPage() {
   )
 
   // Every guest surplus ever banked: the carried-in balance, every other
-  // session, and this one live as it's edited.
+  // session, and this one live as it's edited — less what's been withdrawn.
   const accumulatedFunds =
-    fundHistory.opening +
+    fundHistory.opening -
+    fundHistory.withdrawn +
     Object.entries(fundHistory.bySession)
       .filter(([id]) => id !== session.id)
       .reduce((sum, [, funds]) => sum + funds, 0) +

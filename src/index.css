@@ -792,6 +792,13 @@ table.ledger a { color: var(--court-green); font-weight: 600; }
   font-weight: 700;
 }
 
+/* Fund withdrawals on History */
+.withdrawal-amount { color: #a3402f; font-weight: 600; }
+.form-error { color: #a3402f; font-size: 13px; margin: 0 0 10px; }
+@media (max-width: 640px) {
+  .withdraw-row { flex-direction: column; gap: 0; }
+}
+
 /* ── Queue ─────────────────────────────────────────── */
 .rank-badge {
   display: inline-block;

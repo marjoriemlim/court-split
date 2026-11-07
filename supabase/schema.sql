@@ -122,6 +122,18 @@ create table fund_settings (
 );
 
 -- ─────────────────────────────────────────────
+-- FUND WITHDRAWALS: money taken out of the kitty (new shuttles, a court
+-- deposit, a team dinner). Subtracted from "total accumulated funds".
+-- ─────────────────────────────────────────────
+create table fund_withdrawals (
+  id uuid primary key default gen_random_uuid(),
+  amount numeric(12,2) not null check (amount > 0),
+  note text not null default '',
+  withdrawn_on date not null default current_date,
+  created_at timestamptz not null default now()
+);
+
+-- ─────────────────────────────────────────────
 -- QUEUE ENTRIES: who is checked in to play this session. player_id links to
 -- the roster when there is one; quick-added friends just have a name.
 -- `rank` is a per-night copy of the player's rank, so it can be overridden.
@@ -271,6 +283,7 @@ alter table sessions enable row level security;
 alter table payment_groups enable row level security;
 alter table extra_costs enable row level security;
 alter table fund_settings enable row level security;
+alter table fund_withdrawals enable row level security;
 alter table queue_entries enable row level security;
 alter table matches enable row level security;
 alter table match_players enable row level security;
@@ -295,6 +308,9 @@ create policy "authenticated write extras" on extra_costs for all using (auth.ro
 
 create policy "authenticated read fund_settings" on fund_settings for select using (auth.role() = 'authenticated');
 create policy "authenticated write fund_settings" on fund_settings for all using (auth.role() = 'authenticated');
+
+create policy "authenticated read fund_withdrawals" on fund_withdrawals for select using (auth.role() = 'authenticated');
+create policy "authenticated write fund_withdrawals" on fund_withdrawals for all using (auth.role() = 'authenticated');
 
 create policy "authenticated read queue_entries" on queue_entries for select using (auth.role() = 'authenticated');
 create policy "authenticated write queue_entries" on queue_entries for all using (auth.role() = 'authenticated');
