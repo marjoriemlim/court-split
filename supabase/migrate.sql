@@ -355,7 +355,26 @@ create policy "authenticated read match_players"  on match_players for select us
 create policy "authenticated write match_players" on match_players for all    using (auth.role() = 'authenticated');
 
 -- ---------------------------------------------------------------
--- 11. Tell PostgREST to pick up the new columns immediately
+-- 11. Fund withdrawals: money taken out of the kitty, subtracted
+--     from "total accumulated funds"
+-- ---------------------------------------------------------------
+create table if not exists fund_withdrawals (
+  id uuid primary key default gen_random_uuid(),
+  amount numeric(12,2) not null check (amount > 0),
+  note text not null default '',
+  withdrawn_on date not null default current_date,
+  created_at timestamptz not null default now()
+);
+
+alter table fund_withdrawals enable row level security;
+
+drop policy if exists "authenticated read fund_withdrawals"  on fund_withdrawals;
+drop policy if exists "authenticated write fund_withdrawals" on fund_withdrawals;
+create policy "authenticated read fund_withdrawals"  on fund_withdrawals for select using (auth.role() = 'authenticated');
+create policy "authenticated write fund_withdrawals" on fund_withdrawals for all    using (auth.role() = 'authenticated');
+
+-- ---------------------------------------------------------------
+-- 12. Tell PostgREST to pick up the new columns immediately
 --    (this is what the "schema cache" error is about)
 -- ---------------------------------------------------------------
 notify pgrst, 'reload schema';
