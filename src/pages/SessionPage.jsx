@@ -162,7 +162,7 @@ export default function SessionPage() {
   // minus everything withdrawn from the kitty.
   // The session being edited is deliberately excluded — its live total is added
   // in below, so the running balance tracks edits without waiting for a save.
-  const [fundHistory, setFundHistory] = useState({ opening: 0, withdrawn: 0, bySession: {} })
+  const [fundHistory, setFundHistory] = useState({ opening: 0, withdrawn: 0, withdrawnToday: 0, bySession: {} })
 
   // "covering others" form state
   const [payerId, setPayerId] = useState('')
@@ -337,7 +337,7 @@ export default function SessionPage() {
         .select('opening_balance')
         .maybeSingle()
 
-      const { data: withdrawals } = await supabase.from('fund_withdrawals').select('amount')
+      const { data: withdrawals } = await supabase.from('fund_withdrawals').select('amount, withdrawn_on')
 
       const { data: all } = await supabase
         .from('sessions')
@@ -351,6 +351,10 @@ export default function SessionPage() {
       setFundHistory({
         opening: Number(settings?.opening_balance) || 0,
         withdrawn: (withdrawals || []).reduce((sum, w) => sum + Number(w.amount), 0),
+        // what came out of the kitty on the day on screen, for the receipt image
+        withdrawnToday: (withdrawals || [])
+          .filter((w) => w.withdrawn_on === date)
+          .reduce((sum, w) => sum + Number(w.amount), 0),
         bySession,
       })
     })()
@@ -949,8 +953,8 @@ export default function SessionPage() {
   async function exportLedger(mode) {
     setExporting(mode)
     try {
-      if (document.fonts?.ready) await document.fonts.ready // canvas needs the webfonts loaded
-      const { drawLedgerCanvas, shareCanvas, downloadCanvas } = await import('../lib/ledgerImage')
+      const { drawLedgerCanvas, loadLedgerFonts, shareCanvas, downloadCanvas } = await import('../lib/ledgerImage')
+      await loadLedgerFonts() // canvas needs the webfont loaded before it draws
 
       const label = session.label?.trim()
       const idx = daySessions.findIndex((s) => s.id === session.id)
@@ -971,49 +975,71 @@ export default function SessionPage() {
         t.cost += count * (Number(l.price_each) || 0)
       }
 
+      // One receipt row per ledger line, with the pieces its amount is made of.
+      const receiptRow = (parts, meta) => {
+        const ids = new Set(parts.map((p) => p.row.id))
+        const sum = (fn) => parts.reduce((s, p) => s + fn(p.calc), 0)
+        return {
+          ...meta,
+          headcount: parts.reduce((n, p) => n + (Number(p.row.headcount) || 0), 0),
+          base: sum((c) => c.baseCost),
+          guestFee: sum((c) => c.fundsGenerated),
+          splitShare: sum((c) => c.extrasSplitShare),
+          direct: extras
+            .filter((x) => ids.has(x.payment_group_id))
+            .map((x) => ({ label: x.label, amount: Number(x.amount) || 0 })),
+          amount: sum((c) => c.amountToPay),
+        }
+      }
+
+      const guestHeads = groups
+        .filter((g) => g.payer_status_snapshot === 'guest')
+        .reduce((n, g) => n + (Number(g.headcount) || 0), 0)
+      const out = fundHistory.withdrawnToday || 0
+      const nonZeroAmt = (n) => Math.abs(Number(n) || 0) > 0.005
+      const showFund = nonZeroAmt(accumulatedFunds) || nonZeroAmt(totals.totalFunds) || nonZeroAmt(out)
+
       const canvas = drawLedgerCanvas({
         dateLine: prettyDate(date) + (sessionName ? ` · ${sessionName}` : ''),
-        rateLine:
-          `${peso(rates.courtUnitCost)} court + ${peso(rates.shuttleUnitCost)} shuttle per person` +
-          ` · ${headTotal} player${headTotal === 1 ? '' : 's'}` +
-          // only when shuttles were actually logged — "0 shuttles used" is noise
-          (shuttleCount
-            ? ` · ${shuttleCount} shuttle${shuttleCount === 1 ? '' : 's'} used`
-            : ''),
+        players: headTotal,
+        courtTotal: rates.courtUnitCost * headTotal,
+        courtUnit: rates.courtUnitCost,
         shuttles: shuttleByType,
         shuttleTotal: rates.shuttleTotalCost,
+        shuttleCount,
+        shuttleUnit: rates.shuttleUnitCost,
+        baseUnit: rates.courtUnitCost + rates.shuttleUnitCost,
+        guestRate: Number(session.guest_fixed_rate) || 0,
         rows: ledgerRows.map((lr) =>
           lr.type === 'solo'
-            ? {
+            ? receiptRow([{ row: lr.row, calc: lr.calc }], {
                 name: lr.row.players?.name || 'Unknown',
-                sub: lr.row.members ? `+ ${lr.row.members}` : '',
+                sub: lr.row.members ? `${lr.row.players?.name || 'Unknown'} + ${lr.row.members}` : '',
                 status: lr.row.payer_status_snapshot,
                 paid: !!lr.row.paid_at,
-                headcount: lr.row.headcount,
-                adj: lr.calc.extrasTotal,
-                funds: lr.calc.fundsGenerated,
-                amount: lr.calc.amountToPay,
-              }
-            : {
+              })
+            : receiptRow(lr.parts, {
                 name: lr.title,
                 sub: lr.names.join(' + '),
                 status: lr.allGuest ? 'guest' : lr.anyGuest ? 'mixed' : 'regular',
                 paid: lr.allPaid,
                 partPaid: lr.paidCount > 0 && !lr.allPaid,
-                headcount: lr.headcount,
-                adj: lr.extrasTotal,
-                funds: lr.fundsGenerated,
-                amount: lr.amountToPay,
-              }
+              })
         ),
-        adjustments: extras.map((x) => ({
+        extras: extras.map((x) => ({
           label: x.label,
-          scope: x.payment_group_id ? targetName(x.payment_group_id) : 'split among everyone',
+          scope: x.payment_group_id ? targetName(x.payment_group_id) : '',
           amount: Number(x.amount) || 0,
         })),
-        totalFunds: totals.totalFunds,
-        totalAccumulated: accumulatedFunds,
-        fmt: peso,
+        fund: showFund
+          ? {
+              previous: accumulatedFunds - totals.totalFunds + out,
+              guestFees: totals.totalFunds,
+              guestHeads,
+              out,
+              balance: accumulatedFunds,
+            }
+          : null,
       })
 
       const suffix = sessionName ? `-${sessionName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : ''
