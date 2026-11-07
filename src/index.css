@@ -590,6 +590,11 @@ button.danger-link {
   font-weight: 600;
 }
 
+/* The line currently loaded into the form for editing */
+.extra-list li.is-editing { background: var(--guest-tint); }
+.editing-note { margin: 0 0 10px; }
+.form-actions { display: flex; gap: 10px; align-items: center; }
+
 /* ───────────────────────────── Mobile ───────────────────────────── */
 @media (max-width: 640px) {
   body { font-size: 16px; } /* keeps iOS from zooming on input focus */
