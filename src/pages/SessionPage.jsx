@@ -174,6 +174,8 @@ export default function SessionPage() {
   const [costAmount, setCostAmount] = useState('')
   const [costKind, setCostKind] = useState('charge') // 'charge' adds, 'credit' subtracts
   const [costTarget, setCostTarget] = useState('') // '' = split among everyone, else payment_group id
+  const [editingExtraId, setEditingExtraId] = useState(null) // set → the form edits that line instead of adding
+  const costFormRef = useRef(null)
 
   // ── Deferred writes ──────────────────────────────────────────────
   // Roster taps update local state instantly and queue the real insert/delete.
@@ -205,6 +207,7 @@ export default function SessionPage() {
   function clearSessionRows() {
     setGroups([])
     setExtras([])
+    resetCostForm()
     idByPayer.current = new Map()
   }
 
@@ -686,7 +689,27 @@ export default function SessionPage() {
   }
 
   // ── Additional costs ─────────────────────────────────────────────
-  async function addExtra(e) {
+  function resetCostForm() {
+    setEditingExtraId(null)
+    setCostLabel('')
+    setCostAmount('')
+    setCostKind('charge')
+    setCostTarget('')
+  }
+
+  // Load a saved line into the form; submitting then updates it in place.
+  function startEditExtra(x) {
+    const amount = Number(x.amount)
+    setEditingExtraId(x.id)
+    setCostKind(amount < 0 ? 'credit' : 'charge')
+    setCostLabel(x.label)
+    setCostAmount(String(Math.abs(amount)))
+    setCostTarget(x.payment_group_id || '')
+    costFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  // Add a new line, or save changes to the one being edited.
+  async function saveExtra(e) {
     e.preventDefault()
     if (!costLabel.trim() || costAmount === '' || Number.isNaN(Number(costAmount))) return
     await flushRoster()
@@ -694,30 +717,29 @@ export default function SessionPage() {
     if (target && isTemp(target)) {
       target = idByPayer.current.get(target.slice(TEMP.length)) || null
     }
-    const { data, error } = await supabase
-      .from('extra_costs')
-      .insert({
-        session_id: sessionIdRef.current,
-        label: costLabel.trim(),
-        // the toggle owns the sign, so a stray minus in the box can't flip a
-        // charge into a credit behind your back
-        amount: Math.abs(Number(costAmount) || 0) * (costKind === 'credit' ? -1 : 1),
-        payment_group_id: target,
-      })
-      .select()
-      .single()
+    const fields = {
+      label: costLabel.trim(),
+      // the toggle owns the sign, so a stray minus in the box can't flip a
+      // charge into a credit behind your back
+      amount: Math.abs(Number(costAmount) || 0) * (costKind === 'credit' ? -1 : 1),
+      payment_group_id: target,
+    }
+    const query = editingExtraId
+      ? supabase.from('extra_costs').update(fields).eq('id', editingExtraId)
+      : supabase.from('extra_costs').insert({ session_id: sessionIdRef.current, ...fields })
+    const { data, error } = await query.select().single()
     if (error) {
       setSaveError(error.message)
       return
     }
-    setExtras((prev) => [...prev, data])
-    setCostLabel('')
-    setCostAmount('')
-    setCostKind('charge')
-    setCostTarget('')
+    setExtras((prev) =>
+      editingExtraId ? prev.map((x) => (x.id === data.id ? data : x)) : [...prev, data]
+    )
+    resetCostForm()
   }
 
   async function removeExtra(id) {
+    if (id === editingExtraId) resetCostForm()
     setExtras((prev) => prev.filter((x) => x.id !== id))
     const { error } = await supabase.from('extra_costs').delete().eq('id', id)
     if (error) setSaveError(error.message)
@@ -1261,13 +1283,17 @@ export default function SessionPage() {
             {extras.map((x) => {
               const credit = Number(x.amount) < 0
               return (
-                <li key={x.id} className={credit ? 'is-credit' : ''}>
+                <li
+                  key={x.id}
+                  className={[credit && 'is-credit', x.id === editingExtraId && 'is-editing'].filter(Boolean).join(' ')}
+                >
                   <span className="extra-name">{x.label}</span>
                   <span className="extra-target">
                     {credit ? 'credit ' : ''}
                     {x.payment_group_id ? `→ ${targetName(x.payment_group_id)}` : '→ split among everyone'}
                   </span>
                   <span className="extra-amount">{peso(x.amount)}</span>
+                  <button className="danger-link" onClick={() => startEditExtra(x)}>Edit</button>
                   <button className="danger-link" onClick={() => removeExtra(x.id)}>Remove</button>
                 </li>
               )
@@ -1275,7 +1301,13 @@ export default function SessionPage() {
           </ul>
         )}
 
-        <form onSubmit={addExtra}>
+        <form onSubmit={saveExtra} ref={costFormRef}>
+          {editingExtraId && (
+            <p className="hint editing-note">
+              Editing <strong>{extras.find((x) => x.id === editingExtraId)?.label}</strong> — change anything
+              below, then save.
+            </p>
+          )}
           <div className="field-row">
             <div className="field">
               <label>Type</label>
@@ -1320,9 +1352,16 @@ export default function SessionPage() {
             </div>
             <div className="field" />
           </div>
-          <button className="primary" type="submit">
-            {costKind === 'credit' ? 'Add credit' : 'Add charge'}
-          </button>
+          <div className="form-actions">
+            <button className="primary" type="submit">
+              {editingExtraId ? 'Save changes' : costKind === 'credit' ? 'Add credit' : 'Add charge'}
+            </button>
+            {editingExtraId && (
+              <button className="ghost" type="button" onClick={resetCostForm}>
+                Cancel
+              </button>
+            )}
+          </div>
         </form>
 
         {exSummary.splitTotal !== 0 && (
