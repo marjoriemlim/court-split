@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
-import { calcSessionTotals, money } from '../lib/calc'
+import { calcSessionTotals, money, netFundAdjustments } from '../lib/calc'
 
 /**
  * A session only belongs in History once something was actually recorded against
@@ -76,18 +76,18 @@ export default function History() {
     load()
   }, [])
 
-  async function addWithdrawal(e) {
-    e.preventDefault()
+  // kind: 'deposit' adds to the funds, 'withdrawal' takes money out.
+  async function addAdjustment(kind) {
     const amount = Math.round(Number(wAmount) * 100) / 100
     if (!(amount > 0)) {
       setError('Enter an amount greater than zero.')
       return
     }
     setError('')
-    setSaving(true)
+    setSaving(kind)
     const { error: err } = await supabase
       .from('fund_withdrawals')
-      .insert({ amount, note: wNote.trim(), withdrawn_on: wDate || todayStr() })
+      .insert({ amount, kind, note: wNote.trim(), withdrawn_on: wDate || todayStr() })
     setSaving(false)
     if (err) {
       setError(`Couldn't save: ${err.message}`)
@@ -100,8 +100,10 @@ export default function History() {
   }
 
   async function deleteWithdrawal(w) {
-    const what = w.note ? `"${w.note}"` : 'this withdrawal'
-    if (!window.confirm(`Remove ${what} (₱${money(w.amount)})? It goes back into the total.`)) return
+    const deposit = w.kind === 'deposit'
+    const what = w.note ? `"${w.note}"` : deposit ? 'this addition' : 'this withdrawal'
+    const effect = deposit ? 'It comes back out of the total.' : 'It goes back into the total.'
+    if (!window.confirm(`Remove ${what} (₱${money(w.amount)})? ${effect}`)) return
     const { error: err } = await supabase.from('fund_withdrawals').delete().eq('id', w.id)
     if (err) {
       setError(`Couldn't remove: ${err.message}`)
@@ -111,11 +113,16 @@ export default function History() {
   }
 
   const generated = rows.reduce((sum, r) => sum + r.totals.totalFunds, 0)
-  const withdrawn = withdrawals.reduce((sum, w) => sum + Number(w.amount), 0)
-  const accumulated = opening.balance + generated - withdrawn
+  const sumOf = (kind) =>
+    withdrawals
+      .filter((w) => (w.kind === 'deposit') === (kind === 'deposit'))
+      .reduce((sum, w) => sum + Number(w.amount), 0)
+  const deposited = sumOf('deposit')
+  const withdrawn = sumOf('withdrawal')
+  const accumulated = opening.balance + generated + netFundAdjustments(withdrawals)
 
-  // Sessions and withdrawals in one newest-first ledger. On the same day the
-  // withdrawal sits above the sessions (it usually comes out of that day's take).
+  // Sessions and adjustments in one newest-first ledger. On the same day the
+  // adjustment sits above the sessions (it usually relates to that day's take).
   const ledger = [
     ...rows.map((r) => ({ kind: 'session', date: r.session_date, r })),
     ...withdrawals.map((w) => ({ kind: 'withdrawal', date: w.withdrawn_on, w })),
@@ -134,16 +141,23 @@ export default function History() {
           <div className="summary-card gold">
             <div className="label">Total accumulated funds (all time)</div>
             <div className="value">₱{money(accumulated)}</div>
-            {withdrawn > 0 && (
-              <div className="sub-note">after ₱{money(withdrawn)} taken out</div>
+            {(deposited > 0 || withdrawn > 0) && (
+              <div className="sub-note">
+                {[
+                  deposited > 0 && `₱${money(deposited)} added`,
+                  withdrawn > 0 && `₱${money(withdrawn)} taken out`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </div>
             )}
           </div>
         </div>
       </div>
 
       <div className="panel">
-        <h2>Take money out of the funds</h2>
-        <form onSubmit={addWithdrawal}>
+        <h2>Add to or take out of the funds</h2>
+        <form onSubmit={(e) => e.preventDefault()}>
           <div className="field-row withdraw-row">
             <div className="field">
               <label>Amount (₱)</label>
@@ -158,11 +172,11 @@ export default function History() {
               />
             </div>
             <div className="field" style={{ flex: 2 }}>
-              <label>What for</label>
+              <label>Note</label>
               <input
                 value={wNote}
                 onChange={(e) => setWNote(e.target.value)}
-                placeholder="e.g. New tube of shuttles"
+                placeholder="e.g. Donation, or new tube of shuttles"
               />
             </div>
             <div className="field">
@@ -171,9 +185,24 @@ export default function History() {
             </div>
           </div>
           {error && <p className="form-error">{error}</p>}
-          <button className="primary" type="submit" disabled={saving}>
-            {saving ? 'Saving…' : 'Subtract from funds'}
-          </button>
+          <div className="fund-actions">
+            <button
+              className="primary"
+              type="button"
+              disabled={!!saving}
+              onClick={() => addAdjustment('deposit')}
+            >
+              {saving === 'deposit' ? 'Saving…' : 'Add to funds'}
+            </button>
+            <button
+              className="ghost"
+              type="button"
+              disabled={!!saving}
+              onClick={() => addAdjustment('withdrawal')}
+            >
+              {saving === 'withdrawal' ? 'Saving…' : 'Take out of funds'}
+            </button>
+          </div>
         </form>
       </div>
 
@@ -200,7 +229,8 @@ export default function History() {
                       <td>
                         {item.w.withdrawn_on}
                         <div className="sub-note">
-                          Taken out{item.w.note ? ` — ${item.w.note}` : ''}
+                          {item.w.kind === 'deposit' ? 'Added' : 'Taken out'}
+                          {item.w.note ? ` — ${item.w.note}` : ''}
                           {' · '}
                           <button className="danger-link" onClick={() => deleteWithdrawal(item.w)}>
                             Remove
@@ -210,7 +240,11 @@ export default function History() {
                       <td className="num">—</td>
                       <td className="num">—</td>
                       <td className="num">—</td>
-                      <td className="num withdrawal-amount">−₱{money(item.w.amount)}</td>
+                      {item.w.kind === 'deposit' ? (
+                        <td className="num deposit-amount">+₱{money(item.w.amount)}</td>
+                      ) : (
+                        <td className="num withdrawal-amount">−₱{money(item.w.amount)}</td>
+                      )}
                     </tr>
                   ) : (
                     <tr key={item.r.id}>

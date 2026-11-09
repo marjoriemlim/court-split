@@ -153,6 +153,17 @@ export function calcSessionTotals(session, groups, extras) {
   )
 }
 
+/**
+ * Net effect of manual fund adjustments (rows of fund_withdrawals) on the
+ * all-time balance: deposits add, withdrawals subtract. Rows without a kind
+ * predate deposits and are withdrawals.
+ */
+export const netFundAdjustments = (rows) =>
+  (rows || []).reduce(
+    (sum, r) => sum + (r.kind === 'deposit' ? 1 : -1) * Number(r.amount),
+    0
+  )
+
 export const money = (n) =>
   Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 

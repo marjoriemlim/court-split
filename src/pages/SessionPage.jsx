@@ -11,6 +11,7 @@ import {
   totalHeadcount,
   money,
   peso,
+  netFundAdjustments,
 } from '../lib/calc'
 
 const pad = (n) => String(n).padStart(2, '0')
@@ -159,10 +160,10 @@ export default function SessionPage() {
 
   // Everything the all-time fund balance needs that isn't the session on screen:
   // the balance carried in before the app, plus each other session's funds,
-  // minus everything withdrawn from the kitty.
+  // plus the net of manual adjustments (deposits in, withdrawals out).
   // The session being edited is deliberately excluded — its live total is added
   // in below, so the running balance tracks edits without waiting for a save.
-  const [fundHistory, setFundHistory] = useState({ opening: 0, withdrawn: 0, bySession: {} })
+  const [fundHistory, setFundHistory] = useState({ opening: 0, adjusted: 0, bySession: {} })
 
   // "covering others" form state
   const [payerId, setPayerId] = useState('')
@@ -337,7 +338,7 @@ export default function SessionPage() {
         .select('opening_balance')
         .maybeSingle()
 
-      const { data: withdrawals } = await supabase.from('fund_withdrawals').select('amount')
+      const { data: adjustments } = await supabase.from('fund_withdrawals').select('amount, kind')
 
       const { data: all } = await supabase
         .from('sessions')
@@ -350,7 +351,7 @@ export default function SessionPage() {
       }
       setFundHistory({
         opening: Number(settings?.opening_balance) || 0,
-        withdrawn: (withdrawals || []).reduce((sum, w) => sum + Number(w.amount), 0),
+        adjusted: netFundAdjustments(adjustments),
         bySession,
       })
     })()
@@ -855,10 +856,10 @@ export default function SessionPage() {
   )
 
   // Every guest surplus ever banked: the carried-in balance, every other
-  // session, and this one live as it's edited — less what's been withdrawn.
+  // session, and this one live as it's edited — plus deposits, less withdrawals.
   const accumulatedFunds =
-    fundHistory.opening -
-    fundHistory.withdrawn +
+    fundHistory.opening +
+    fundHistory.adjusted +
     Object.entries(fundHistory.bySession)
       .filter(([id]) => id !== session.id)
       .reduce((sum, [, funds]) => sum + funds, 0) +

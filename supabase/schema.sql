@@ -122,12 +122,16 @@ create table fund_settings (
 );
 
 -- ─────────────────────────────────────────────
--- FUND WITHDRAWALS: money taken out of the kitty (new shuttles, a court
--- deposit, a team dinner). Subtracted from "total accumulated funds".
+-- FUND WITHDRAWALS: manual fund adjustments. kind = 'withdrawal' is money
+-- taken out of the kitty (new shuttles, a court deposit, a team dinner) and
+-- is subtracted from "total accumulated funds"; kind = 'deposit' is money
+-- put in outside a session (a donation, a top-up) and is added to it.
+-- amount is always positive; kind gives the direction.
 -- ─────────────────────────────────────────────
 create table fund_withdrawals (
   id uuid primary key default gen_random_uuid(),
   amount numeric(12,2) not null check (amount > 0),
+  kind text not null default 'withdrawal' check (kind in ('withdrawal', 'deposit')),
   note text not null default '',
   withdrawn_on date not null default current_date,
   created_at timestamptz not null default now()

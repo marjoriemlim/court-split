@@ -374,7 +374,18 @@ create policy "authenticated read fund_withdrawals"  on fund_withdrawals for sel
 create policy "authenticated write fund_withdrawals" on fund_withdrawals for all    using (auth.role() = 'authenticated');
 
 -- ---------------------------------------------------------------
--- 12. Tell PostgREST to pick up the new columns immediately
+-- 12. Fund deposits: money added to the kitty outside a session.
+--     Stored alongside withdrawals; kind gives the direction.
+-- ---------------------------------------------------------------
+alter table fund_withdrawals
+  add column if not exists kind text not null default 'withdrawal';
+
+alter table fund_withdrawals drop constraint if exists fund_withdrawals_kind_check;
+alter table fund_withdrawals
+  add constraint fund_withdrawals_kind_check check (kind in ('withdrawal', 'deposit'));
+
+-- ---------------------------------------------------------------
+-- 13. Tell PostgREST to pick up the new columns immediately
 --    (this is what the "schema cache" error is about)
 -- ---------------------------------------------------------------
 notify pgrst, 'reload schema';
